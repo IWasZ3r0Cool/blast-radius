@@ -30,20 +30,19 @@ _REQ_PROVIDERS_RE = re.compile(
 _PROV_ENTRY_RE = re.compile(r'^\s+(\w+)\s*=\s*\{', re.MULTILINE)
 
 # Generic resource reference scan: aws_s3_bucket.my_bucket
-# Requires at least one underscore in the type name to filter out var/local/module/data
-_RES_REF_RE  = re.compile(r'\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\.([a-zA-Z0-9_]+)\b')
+# Requires at least one underscore AND explicitly excludes var./local./data./module. prefixes
+_RES_REF_RE  = re.compile(
+    r'\b(?!(?:var|local|data|module)\.)([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\.([a-zA-Z0-9_]+)\b'
+)
 # Data reference: data.type.name
 _DATA_REF_RE = re.compile(r'\bdata\.([a-z][a-z0-9_]*)\.([a-zA-Z0-9_]+)\b')
 # Variable definition and reference: variable "name" / var.name
 _VAR_DEF_RE  = re.compile(r'^variable\s+"([^"]+)"', re.MULTILINE)
 _VAR_REF_RE  = re.compile(r'\bvar\.([a-zA-Z0-9_]+)\b')
-# Locals block parsing and reference
-_LOCALS_BLOCK_RE = re.compile(
-    r'^locals\s*\{((?:[^{}]|\{[^{}]*\})*)\}',
-    re.MULTILINE | re.DOTALL,
-)
-_LOCAL_KEY_RE    = re.compile(r'^\s+(\w+)\s*=', re.MULTILINE)
-_LOCAL_NESTED_RE = re.compile(r'\{[^{}]*\}')   # strip nested objects before key scan
+# Locals block header — full block extracted via _find_block to handle any nesting depth
+_LOCALS_HEADER_RE = re.compile(r'^locals\b', re.MULTILINE)
+_LOCAL_KEY_RE     = re.compile(r'^\s+(\w+)\s*=', re.MULTILINE)
+_LOCAL_NESTED_RE  = re.compile(r'\{[^{}]*\}')  # innermost block — applied iteratively
 _LOCAL_REF_RE    = re.compile(r'\blocal\.([a-zA-Z0-9_]+)\b')
 # Output definition
 _OUTPUT_DEF_RE = re.compile(r'^output\s+"([^"]+)"', re.MULTILINE)
@@ -83,12 +82,30 @@ def node_type(path: Path, has_resources: bool, has_data: bool) -> str:
     return "module"
 
 
+def _find_block(source: str, start: int) -> str:
+    """Return the content between the braces of the {...} block whose opening brace
+    is at the first '{' found at position >= start.  Returns '' if no block found."""
+    i = source.find('{', start)
+    if i == -1:
+        return ""
+    depth = 1
+    j = i + 1
+    while j < len(source) and depth > 0:
+        c = source[j]
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        j += 1
+    return source[i + 1 : j - 1]
+
+
 def _module_sources(source: str) -> list[tuple[str, str]]:
     """Return (module_name, source_value) for all module blocks in source."""
     results = []
     for m in _MODULE_RE.finditer(source):
-        window = source[m.start(): m.start() + 600]
-        src_m  = _SOURCE_ATTR_RE.search(window)
+        block = _find_block(source, m.end())
+        src_m = _SOURCE_ATTR_RE.search(block)
         if src_m:
             results.append((m.group(1), src_m.group(1)))
     return results
@@ -194,8 +211,14 @@ def analyze(root: Path, group_map: dict):
             var_defs     = {m.group(1) for m in _VAR_DEF_RE.finditer(source)}
             mod_instance = {m.group(1) for m in _MODULE_RE.finditer(source)}
             local_defs: set[str] = set()
-            for blk in _LOCALS_BLOCK_RE.finditer(source):
-                flat = _LOCAL_NESTED_RE.sub('{}', blk.group(1))
+            for hm in _LOCALS_HEADER_RE.finditer(source):
+                blk = _find_block(source, hm.end())
+                flat = blk
+                while True:
+                    stripped = _LOCAL_NESTED_RE.sub('{}', flat)
+                    if stripped == flat:
+                        break
+                    flat = stripped
                 for km in _LOCAL_KEY_RE.finditer(flat):
                     local_defs.add(km.group(1))
 
