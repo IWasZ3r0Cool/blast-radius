@@ -1,6 +1,12 @@
 # Generated artifacts
 codeindex.json
 repo_graph.json
+symbolindex.json
+.codeindex/
+benchmark/results.json
+
+# Claude Code
+.claude/
 
 # Python
 __pycache__/
