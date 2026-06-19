@@ -25,6 +25,11 @@ _KIND_ABBR = {
     "type":      "ty",
     "const":     "co",
     "module":    "mod",
+    "resource":  "res",
+    "data":      "dat",
+    "variable":  "var",
+    "output":    "out",
+    "provider":  "prv",
 }
 
 

@@ -337,6 +337,7 @@
     z-index: 9999;
     display: none;
     max-width: 220px;
+    overflow-wrap: break-word;
     box-shadow: 0 0 24px rgba(0,212,255,0.2);
   }
 
@@ -1174,8 +1175,15 @@ function showTooltip(evt, node) {
 }
 function hideTooltip() { tooltip.style.display = 'none'; }
 document.addEventListener('mousemove', e => {
-  tooltip.style.left = (e.clientX + 14) + 'px';
-  tooltip.style.top = (e.clientY - 10) + 'px';
+  const tw = tooltip.offsetWidth;
+  const th = tooltip.offsetHeight;
+  const margin = 8;
+  let left = e.clientX + 14;
+  let top = e.clientY - 10;
+  if (left + tw + margin > window.innerWidth) left = e.clientX - tw - 14;
+  if (top + th + margin > window.innerHeight) top = e.clientY - th - 10;
+  tooltip.style.left = left + 'px';
+  tooltip.style.top = top + 'px';
 });
 
 function showNodeDetail(node) {

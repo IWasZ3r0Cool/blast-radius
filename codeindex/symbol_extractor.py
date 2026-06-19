@@ -374,6 +374,47 @@ def extract_ruby(path: Path) -> list[dict]:
     return symbols
 
 
+# ── Terraform / HCL ──────────────────────────────────────────────────────────
+
+_TF_RESOURCE_RE = re.compile(r'^resource\s+"([^"]+)"\s+"([^"]+)"', re.MULTILINE)
+_TF_DATA_RE     = re.compile(r'^data\s+"([^"]+)"\s+"([^"]+)"',     re.MULTILINE)
+_TF_MODULE_RE   = re.compile(r'^module\s+"([^"]+)"',               re.MULTILINE)
+_TF_VAR_RE      = re.compile(r'^variable\s+"([^"]+)"',             re.MULTILINE)
+_TF_OUTPUT_RE   = re.compile(r'^output\s+"([^"]+)"',               re.MULTILINE)
+_TF_PROVIDER_RE = re.compile(r'^provider\s+"([^"]+)"',             re.MULTILINE)
+
+
+def extract_terraform(path: Path) -> list[dict]:
+    try:
+        source = path.read_text(errors="replace")
+    except OSError:
+        return []
+
+    symbols: list[dict] = []
+    seen: set[str] = set()
+
+    for pat, kind, fmt, exported in (
+        (_TF_RESOURCE_RE, "resource",  "{0}.{1}",       True),
+        (_TF_DATA_RE,     "data",      "data.{0}.{1}",  True),
+        (_TF_MODULE_RE,   "module",    "module.{0}",    True),
+        (_TF_VAR_RE,      "variable",  "var.{0}",       True),
+        (_TF_OUTPUT_RE,   "output",    "{0}",           True),
+        (_TF_PROVIDER_RE, "provider",  "provider.{0}",  False),
+    ):
+        for m in pat.finditer(source):
+            name = fmt.format(*m.groups())
+            if name and name not in seen:
+                seen.add(name)
+                symbols.append({
+                    "name":     name,
+                    "line":     _line_of(source, m.start()),
+                    "kind":     kind,
+                    "exported": exported,
+                })
+
+    return symbols
+
+
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 
 EXTRACTORS: dict[str, callable] = {
@@ -392,6 +433,7 @@ EXTRACTORS: dict[str, callable] = {
     ".rs":   extract_rust,
     ".php":  extract_php,
     ".rb":   extract_ruby,
+    ".tf":   extract_terraform,
 }
 
 

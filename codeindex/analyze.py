@@ -6,7 +6,7 @@ from pathlib import Path
 from codeindex.analyzers import (
     python_analyzer, js_analyzer, css_analyzer, go_analyzer,
     ruby_analyzer, rust_analyzer, java_analyzer, php_analyzer,
-    docker_analyzer, ci_analyzer, schema_analyzer,
+    docker_analyzer, ci_analyzer, schema_analyzer, terraform_analyzer,
 )
 from codeindex.analyzers.cross_lang_analyzer import find_api_boundaries
 from codeindex.analyzers.monorepo_analyzer import detect_workspaces, assign_packages
@@ -51,6 +51,8 @@ def detect_languages(root: Path) -> list:
         langs.append("ci")
     if _any_match(root, ["*.sql", "*.prisma"]):
         langs.append("schema")
+    if _any_match(root, ["*.tf"]):
+        langs.append("terraform")
     return langs
 
 
@@ -62,7 +64,7 @@ def merge_links(target: dict, source: dict) -> None:
 _INFRA_TYPES   = {"service", "pipeline", "database"}
 _FRONTEND_LANGS = {"javascript", "typescript", "vue", "css", "scss", "less", "sass"}
 _BACKEND_LANGS  = {"python", "go", "ruby", "rust", "java", "kotlin", "php"}
-_INFRA_LANGS    = {"docker", "github-actions", "gitlab-ci", "sql", "prisma"}
+_INFRA_LANGS    = {"docker", "github-actions", "gitlab-ci", "sql", "prisma", "terraform"}
 
 _ANALYZERS = {
     "python":     python_analyzer,
@@ -76,6 +78,7 @@ _ANALYZERS = {
     "docker":     docker_analyzer,
     "ci":         ci_analyzer,
     "schema":     schema_analyzer,
+    "terraform":  terraform_analyzer,
 }
 
 
