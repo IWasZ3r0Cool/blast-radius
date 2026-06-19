@@ -55,6 +55,7 @@ _MOD_REF_RE  = re.compile(r'\bmodule\.([a-zA-Z0-9_]+)\b(?!\.[a-zA-Z0-9_])')
 _CONFIG_STEMS = {
     "variables", "vars", "versions", "providers",
     "terraform", "backend", "locals", "settings",
+    "outputs", "output",
 }
 _MODULE_DIRS = {"modules", "module"}
 
@@ -91,9 +92,28 @@ def _find_block(source: str, start: int) -> str:
         return ""
     depth = 1
     j = i + 1
-    while j < len(source) and depth > 0:
+    n = len(source)
+    while j < n and depth > 0:
         c = source[j]
-        if c == '{':
+        if c == '"':
+            j += 1
+            while j < n:
+                ch = source[j]
+                if ch == '\\':
+                    j += 2
+                    continue
+                if ch == '"':
+                    break
+                j += 1
+        elif c == '#' or (c == '/' and j + 1 < n and source[j + 1] == '/'):
+            while j < n and source[j] != '\n':
+                j += 1
+        elif c == '/' and j + 1 < n and source[j + 1] == '*':
+            j += 2
+            while j + 1 < n and not (source[j] == '*' and source[j + 1] == '/'):
+                j += 1
+            j += 2
+        elif c == '{':
             depth += 1
         elif c == '}':
             depth -= 1
