@@ -49,7 +49,8 @@ _OUTPUT_DEF_RE = re.compile(r'^output\s+"([^"]+)"', re.MULTILINE)
 # Module output reference: module.name.attr — 3-part cross-dir lookup
 _MOD_OUTPUT_REF_RE = re.compile(r'\bmodule\.([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\b')
 # Module block reference (2-part): links to file declaring module "name" in same dir
-_MOD_REF_RE  = re.compile(r'\bmodule\.([a-zA-Z0-9_]+)\b')
+# Negative lookahead excludes 3-part module.X.attr references (handled by _MOD_OUTPUT_REF_RE)
+_MOD_REF_RE  = re.compile(r'\bmodule\.([a-zA-Z0-9_]+)\b(?!\.[a-zA-Z0-9_])')
 
 _CONFIG_STEMS = {
     "variables", "vars", "versions", "providers",
