@@ -75,7 +75,7 @@ def _start_watcher(repo_path: str) -> None:
         from watchdog.observers import Observer
         from watchdog.events import FileSystemEventHandler
     except ImportError:
-        print("watchdog not installed — run: pip install watchdog", file=sys.stderr)
+        print("watchdog not installed — run: pip install 'blastradius-cli[watch]'", file=sys.stderr)
         return
 
     WATCHED_EXTS = {
