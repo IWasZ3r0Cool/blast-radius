@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -44,6 +43,7 @@ def _run_analyze(repo: Path) -> dict:
     """Run blastradius.index.build() and return the parsed JSON output."""
     # Import here so we get the Phase-1 version, not a cached import
     import importlib
+
     import blastradius.index as idx_mod
     importlib.reload(idx_mod)
 
@@ -87,8 +87,8 @@ def test_golden_idempotent(tmp_path: Path) -> None:
 
 def test_db_populated(tmp_path: Path) -> None:
     """After analyze(), the SQLite store contains the expected file rows."""
-    from blastradius.store import Store
     from blastradius.index import db_path_for
+    from blastradius.store import Store
 
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_SRC, repo)
@@ -147,8 +147,8 @@ def test_incremental_detection(tmp_path: Path, capsys: pytest.CaptureFixture) ->
 
 def test_db_status_counts(tmp_path: Path) -> None:
     """store.status() counts match the number of nodes analyze() produced."""
-    from blastradius.store import Store
     from blastradius.index import db_path_for
+    from blastradius.store import Store
 
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_SRC, repo)
@@ -172,8 +172,8 @@ def test_db_status_counts(tmp_path: Path) -> None:
 
 def test_soft_delete_on_removal(tmp_path: Path) -> None:
     """Removing a file marks its DB row inactive, not deleted."""
-    from blastradius.store import Store
     from blastradius.index import db_path_for
+    from blastradius.store import Store
 
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_SRC, repo)

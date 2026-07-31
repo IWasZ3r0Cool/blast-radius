@@ -2,13 +2,22 @@
 # Licensed under the Apache License, Version 2.0
 """Stdio MCP server — exposes blastradius tools to Claude and other MCP clients."""
 from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
 
-from blastradius.index import build, load, find_index, find_db, INDEX_FILENAME
-from blastradius.index import git_reachable, git_resolve, git_modified
 from blastradius.impact import compute_blast_radius
+from blastradius.index import (
+    INDEX_FILENAME,
+    build,
+    find_db,
+    find_index,
+    git_modified,
+    git_reachable,
+    git_resolve,
+    load,
+)
 from blastradius.reporter import format_markdown
 from blastradius.symbols import SYMBOL_INDEX_FILENAME
 
@@ -394,7 +403,8 @@ def _call_lookup_symbol(params: dict) -> dict:
 
 
 def _call_build_symbol_index(params: dict) -> dict:
-    from blastradius.symbols import build_symbol_index as _build, write_standalone  # noqa: PLC0415
+    from blastradius.symbols import build_symbol_index as _build
+    from blastradius.symbols import write_standalone
     repo_path = params["repo_path"]
     symbol_data = _build(repo_path)
     out = Path(repo_path) / SYMBOL_INDEX_FILENAME
@@ -423,8 +433,9 @@ def _resolve_db(params: dict):
 
 
 def _call_semantic_search(params: dict) -> dict:
-    from blastradius.semantic.search import hybrid_search
     import os
+
+    from blastradius.semantic.search import hybrid_search
 
     store = _resolve_db(params)
 

@@ -1,6 +1,6 @@
 """Install / uninstall a pre-commit hook that reports blast radius for staged files."""
 from __future__ import annotations
-import os
+
 import stat
 import sys
 from pathlib import Path

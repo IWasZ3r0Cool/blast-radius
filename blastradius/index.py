@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from blastradius.analyze import analyze
-from blastradius.impact import compute_blast_radius, enrich_nodes, enrich_links
+from blastradius.impact import compute_blast_radius, enrich_links, enrich_nodes
 from blastradius.store import Store
 
 INDEX_FILENAME = "blastradius.json"

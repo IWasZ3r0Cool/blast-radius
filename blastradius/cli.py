@@ -1,5 +1,6 @@
 """blastradius CLI entry point."""
 from __future__ import annotations
+
 import argparse
 import json
 import sys
@@ -13,8 +14,8 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
 
     if args.watch:
         try:
-            from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
         except ImportError:
             print("watchdog not installed — run: pip install 'blastradius-cli[watch]'", file=sys.stderr)
             sys.exit(1)
@@ -62,10 +63,16 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
 
 
 def _cmd_impact(args: argparse.Namespace) -> None:
-    from blastradius.index import load, find_index, find_db, db_path_for, INDEX_FILENAME
-    from blastradius.index import git_reachable, git_resolve
     from blastradius.impact import compute_blast_radius
-    from blastradius.reporter import format_stdout, format_markdown
+    from blastradius.index import (
+        INDEX_FILENAME,
+        find_db,
+        find_index,
+        git_reachable,
+        git_resolve,
+        load,
+    )
+    from blastradius.reporter import format_markdown, format_stdout
 
     as_of = getattr(args, "as_of", None)
 
@@ -215,11 +222,14 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
 
 def _cmd_symbols(args: argparse.Namespace) -> None:
+    from blastradius.index import INDEX_FILENAME, find_index
     from blastradius.symbols import (
-        build_symbol_index, write_standalone, write_inline, write_claude_md,
         SYMBOL_INDEX_FILENAME,
+        build_symbol_index,
+        write_claude_md,
+        write_inline,
+        write_standalone,
     )
-    from blastradius.index import find_index, INDEX_FILENAME
 
     repo = Path(args.repo).resolve()
     symbol_data = build_symbol_index(str(repo))
@@ -247,7 +257,7 @@ def _cmd_symbols(args: argparse.Namespace) -> None:
 
 
 def _cmd_lookup(args: argparse.Namespace) -> None:
-    from blastradius.index import db_path_for, find_index, INDEX_FILENAME
+    from blastradius.index import db_path_for, find_index
     from blastradius.store import Store
 
     name = args.name
@@ -309,7 +319,7 @@ def _cmd_lookup(args: argparse.Namespace) -> None:
 
 
 def _cmd_dependencies(args: argparse.Namespace) -> None:
-    from blastradius.index import load, find_index, INDEX_FILENAME
+    from blastradius.index import INDEX_FILENAME, find_index, load
     if args.index:
         index_path = Path(args.index)
     else:
@@ -347,7 +357,7 @@ def _cmd_dependencies(args: argparse.Namespace) -> None:
 
 
 def _cmd_high_blast(args: argparse.Namespace) -> None:
-    from blastradius.index import load, find_index, INDEX_FILENAME
+    from blastradius.index import INDEX_FILENAME, find_index, load
     if args.index:
         index_path = Path(args.index)
     else:
@@ -381,8 +391,9 @@ def _cmd_high_blast(args: argparse.Namespace) -> None:
 
 def _cmd_symbol_blast(args: argparse.Namespace) -> None:
     """Per-export blast radius: which importers reference each exported symbol."""
-    from blastradius.index import find_db
     import re as _re
+
+    from blastradius.index import find_db
 
     db_path = find_db(Path.cwd())
     if not db_path or not db_path.exists():
@@ -477,7 +488,7 @@ def _cmd_db(args: argparse.Namespace) -> None:
 
 
 def _cmd_history(args: argparse.Namespace) -> None:
-    from blastradius.index import find_db, db_path_for
+    from blastradius.index import db_path_for, find_db
     from blastradius.store import Store
     from blastradius.temporal import backfill
 
@@ -503,7 +514,7 @@ def _cmd_history(args: argparse.Namespace) -> None:
 
 
 def _cmd_changed_since(args: argparse.Namespace) -> None:
-    from blastradius.index import find_db, git_reachable, git_resolve, git_modified
+    from blastradius.index import find_db, git_modified, git_reachable, git_resolve
     from blastradius.store import Store
 
     db_path = Path(args.db) if getattr(args, "db", None) else find_db(Path.cwd())
@@ -603,8 +614,8 @@ def _cmd_changed_since(args: argparse.Namespace) -> None:
 
 def _cmd_search(args: argparse.Namespace) -> None:
     from blastradius.index import find_db, git_reachable, git_resolve
-    from blastradius.store import Store
     from blastradius.semantic.search import hybrid_search
+    from blastradius.store import Store
 
     db_path = Path(args.db) if getattr(args, "db", None) else find_db(Path.cwd())
     if not db_path or not db_path.exists():

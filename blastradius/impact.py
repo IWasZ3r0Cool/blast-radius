@@ -1,5 +1,6 @@
 """Blast-radius computation: direct + transitive dependents + numeric score."""
 from __future__ import annotations
+
 from collections import defaultdict, deque
 
 

@@ -7,7 +7,7 @@ Links: depends_on relationships between services.
 import re
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir
+from .base import is_ignored, is_skip_dir, load_gitignore_patterns
 
 try:
     import yaml as _yaml

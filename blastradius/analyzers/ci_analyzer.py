@@ -10,7 +10,7 @@ Links: job dependency edges (needs / depends)
 import re
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir
+from .base import load_gitignore_patterns
 
 try:
     import yaml as _yaml

@@ -34,3 +34,8 @@ include = ["blastradius*"]
 
 [tool.setuptools.package-data]
 "blastradius" = ["py.typed"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.1",
+]

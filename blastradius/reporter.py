@@ -67,8 +67,8 @@ def format_markdown(
     lines = [
         f"# Impact Report: `{file_id}`",
         "",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Blast Score | **{sc}** |",
         f"| Direct dependents | {d} |",
         f"| Transitive dependents | {t} |",
@@ -97,7 +97,7 @@ def format_markdown(
     if total_nodes:
         affected = d + t
         pct = round((affected / total_nodes) * 100, 1)
-        lines.append(f"## Summary")
+        lines.append("## Summary")
         lines.append("")
         lines.append(
             f"Modifying `{file_id}` could affect **{affected}/{total_nodes}** files "

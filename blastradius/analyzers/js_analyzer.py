@@ -3,7 +3,7 @@ import json
 import re
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir, dir_group
+from .base import dir_group, is_ignored, is_skip_dir, load_gitignore_patterns
 
 JS_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue"}
 

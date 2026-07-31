@@ -7,8 +7,8 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from blastradius.store.db import Store
     from blastradius.semantic.provider import EmbeddingProvider
+    from blastradius.store.db import Store
 
 _RRF_K = 60  # standard RRF constant
 

@@ -1,11 +1,12 @@
 """Symbol index builder: standalone symbolindex.json, --inline, and --claude-md modes."""
 from __future__ import annotations
+
 import json
 import sys
 from datetime import date
 from pathlib import Path
 
-from blastradius.analyzers.base import load_gitignore_patterns, is_ignored, is_skip_dir
+from blastradius.analyzers.base import is_ignored, is_skip_dir, load_gitignore_patterns
 from blastradius.symbol_extractor import EXTRACTORS, extract_symbols
 
 SYMBOL_INDEX_FILENAME = "symbolindex.json"

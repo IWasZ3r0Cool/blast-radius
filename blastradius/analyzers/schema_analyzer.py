@@ -11,7 +11,7 @@ Links: foreign key / relation edges between tables
 import re
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir, dir_group
+from .base import is_ignored, is_skip_dir, load_gitignore_patterns
 
 # ── SQL regexes ───────────────────────────────────────────────────────────────
 _SQL_TABLE_RE = re.compile(

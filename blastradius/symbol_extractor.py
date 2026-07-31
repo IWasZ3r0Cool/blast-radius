@@ -1,5 +1,6 @@
 """Per-language symbol extraction for the blastradius symbol index."""
 from __future__ import annotations
+
 import ast
 import re
 from pathlib import Path

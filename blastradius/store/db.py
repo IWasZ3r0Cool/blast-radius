@@ -8,8 +8,8 @@ blastradius.semantic. The dependency arrow points only upward into this layer.
 from __future__ import annotations
 
 import re
-import struct
 import sqlite3
+import struct
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -551,7 +551,9 @@ class Store:
         obtained via `git log --format=%H <ref>`.
         Returns None if no temporal data is available.
         """
-        from blastradius.impact import compute_blast_radius  # avoid circular at module level
+        from blastradius.impact import (
+            compute_blast_radius,  # avoid circular at module level
+        )
 
         self._populate_reachable_temp(reachable)
 

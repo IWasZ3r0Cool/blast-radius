@@ -272,7 +272,7 @@ def main() -> None:
 
     print(f"Repo     : {repo}")
     print(f"Command  : {' '.join(command)}")
-    print(f"Starting MCP server…")
+    print("Starting MCP server…")
 
     client = MCPClient(command, cwd=repo)
     time.sleep(0.3)  # let server start

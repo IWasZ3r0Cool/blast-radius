@@ -6,7 +6,7 @@ which matches how Go developers think about their codebase.
 import re
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir, dir_group
+from .base import is_ignored, is_skip_dir, load_gitignore_patterns
 
 # ── Regexes ───────────────────────────────────────────────────────────────────
 _GOMOD_MODULE_RE = re.compile(r'^module\s+(\S+)', re.MULTILINE)

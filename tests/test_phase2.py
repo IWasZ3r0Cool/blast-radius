@@ -11,14 +11,9 @@ Acceptance criteria (from CKG-DESIGN-001):
 """
 from __future__ import annotations
 
-import json
-import os
 import shutil
-import stat
 import subprocess
 from pathlib import Path
-
-import pytest
 
 FIXTURE_SRC = Path(__file__).parent / "fixtures" / "simple_python"
 
@@ -46,6 +41,7 @@ def _commit_all(repo: Path, message: str) -> str:
 
 def _run_analyze(repo: Path) -> None:
     import importlib
+
     import blastradius.index as idx_mod
     importlib.reload(idx_mod)
     idx_mod.build(str(repo))
@@ -86,8 +82,8 @@ def _make_temporal_repo(tmp_path: Path) -> tuple[Path, str, str, str]:
 
 def test_as_of_impact_differs_from_head(tmp_path: Path) -> None:
     """impact B --as-of C2 shows A as dependent; impact B at HEAD does not."""
+    from blastradius.index import db_path_for, git_reachable
     from blastradius.store import Store
-    from blastradius.index import db_path_for, git_reachable, git_resolve
 
     repo, c1, c2, c3 = _make_temporal_repo(tmp_path)
     db_path = db_path_for(repo)
@@ -119,8 +115,8 @@ def test_as_of_impact_differs_from_head(tmp_path: Path) -> None:
 
 def test_changed_since_edges(tmp_path: Path) -> None:
     """changed_since(reachable_C1) shows added edge at C2 and its removal."""
-    from blastradius.store import Store
     from blastradius.index import db_path_for, git_reachable
+    from blastradius.store import Store
 
     repo, c1, c2, c3 = _make_temporal_repo(tmp_path)
     db_path = db_path_for(repo)
@@ -142,8 +138,8 @@ def test_changed_since_edges(tmp_path: Path) -> None:
 
 def test_history_backfill_commits(tmp_path: Path) -> None:
     """blastradius history populates the commits table."""
-    from blastradius.store import Store
     from blastradius.index import db_path_for
+    from blastradius.store import Store
     from blastradius.temporal import backfill
 
     repo = tmp_path / "hist_repo"
@@ -175,8 +171,8 @@ def test_history_backfill_commits(tmp_path: Path) -> None:
 
 def test_history_backfill_first_seen(tmp_path: Path) -> None:
     """After backfill, files have first_seen_commit set."""
-    from blastradius.store import Store
     from blastradius.index import db_path_for
+    from blastradius.store import Store
     from blastradius.temporal import backfill
 
     repo = tmp_path / "seen_repo"
@@ -206,8 +202,8 @@ def test_history_backfill_first_seen(tmp_path: Path) -> None:
 
 def test_history_no_working_tree_change(tmp_path: Path) -> None:
     """git status is clean before and after backfill (no checkout side-effects)."""
-    from blastradius.store import Store
     from blastradius.index import db_path_for
+    from blastradius.store import Store
     from blastradius.temporal import backfill
 
     repo = tmp_path / "clean_repo"
@@ -243,8 +239,8 @@ def test_history_no_working_tree_change(tmp_path: Path) -> None:
 
 def test_changed_since_added_file(tmp_path: Path) -> None:
     """changed_since(C1) shows a file added at C2."""
-    from blastradius.store import Store
     from blastradius.index import db_path_for, git_reachable
+    from blastradius.store import Store
 
     repo = tmp_path / "addfile_repo"
     shutil.copytree(FIXTURE_SRC, repo)

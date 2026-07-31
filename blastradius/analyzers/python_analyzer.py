@@ -3,7 +3,7 @@ import ast
 import sys
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir, dir_group
+from .base import dir_group, is_ignored, is_skip_dir, load_gitignore_patterns
 
 CONFIG_NAMES = {"config", "settings", "constants", "env", "configuration", "conf"}
 STDLIB_TOP = set(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else set()

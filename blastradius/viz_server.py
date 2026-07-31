@@ -1,8 +1,7 @@
 """Minimal HTTP server for the blastradius visualization UI."""
 from __future__ import annotations
+
 import json
-import os
-import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -72,8 +71,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 def _start_watcher(repo_path: str) -> None:
     try:
-        from watchdog.observers import Observer
         from watchdog.events import FileSystemEventHandler
+        from watchdog.observers import Observer
     except ImportError:
         print("watchdog not installed — run: pip install 'blastradius-cli[watch]'", file=sys.stderr)
         return
