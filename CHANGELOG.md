@@ -178,7 +178,7 @@ tools are unchanged.
   fallback to FTS + graph with a clear notice (no crash, no config required)
 - Embeddings generated automatically during `blastradius analyze` when
   `BLASTRADIUS_EMBEDDING_ENDPOINT` / `_MODEL` / `_DIMS` env vars are set
-- `blastradius[semantic]` extra: `pip install 'blastradius[semantic]'`
+- `blastradius-cli[semantic]` extra: `pip install 'blastradius-cli[semantic]'`
 
 #### MCP surface (Phase 4) — 4 new tools, existing 6 unchanged
 - `semantic_search` — hybrid search from an MCP client; degrades gracefully

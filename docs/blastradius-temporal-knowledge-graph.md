@@ -4,7 +4,7 @@
 |---|---|
 | **Doc ID** | CKG-DESIGN-001 |
 | **Status** | Draft — ready for implementation |
-| **Target repo** | `scheidydude/blastradius` |
+| **Target repo** | `IWasZ3r0Cool/blast-radius` |
 | **Audience** | Claude Code (implementing agent) + maintainer |
 | **License constraint** | Apache 2.0 (preserve existing headers) |
 
@@ -83,7 +83,7 @@ blastradius/
 **Hard partitioning rules:**
 
 - `core/`, `store/`, and `temporal/` **must not import** from `graph/` or `semantic/`. The dependency arrow points only *up*, from the heavy layers down into the core — never the reverse. This is what makes a future extraction a move, not a rewrite.
-- `graph/` and `semantic/` are gated behind optional extras (`blastradius[graph]`, `blastradius[semantic]`). The default `pip install blastradius` installs only the lean core + store + temporal and pulls in **no** new runtime dependencies.
+- `graph/` and `semantic/` are gated behind optional extras (`blastradius-cli[graph]`, `blastradius-cli[semantic]`). The default `pip install blastradius-cli` installs only the lean core + store + temporal and pulls in **no** new runtime dependencies.
 - The heavy layers consume the core through its public store/graph API only — never by reaching into core internals — so that when `graph/`+`semantic/` are lifted into a standalone package, the only change is declaring `blastradius` as a dependency.
 
 ## 5. Data model
@@ -219,7 +219,7 @@ This is the most performance-sensitive component — see Risks. Default to **bou
 ### 6.4 Semantic layer (Phase 3)
 - **What gets embedded:** per symbol, the concatenation of `name + signature + doc` (skip empties).
 - **Embedding provider interface** (`blastradius/semantic/`): a small abstraction with one shipped implementation — an **OpenAI-compatible `/v1/embeddings` HTTP client** built on stdlib `urllib` (no new dependency for the client itself). Endpoint URL, model name, and dimensions come from config/env. This targets a self-hosted local inference server out of the box.
-- **Vector store:** `sqlite-vec` `vec0` virtual table. This is the single new optional dependency, gated behind the `blastradius[semantic]` extra. If the extension can't load, semantic features degrade gracefully (log a clear message, fall back to FTS + exact) — they never hard-fail the tool.
+- **Vector store:** `sqlite-vec` `vec0` virtual table. This is the single new optional dependency, gated behind the `blastradius-cli[semantic]` extra. If the extension can't load, semantic features degrade gracefully (log a clear message, fall back to FTS + exact) — they never hard-fail the tool.
 - Embeddings are (re)generated only for new/changed symbols during indexing, batched.
 
 ### 6.5 Hybrid query engine
@@ -300,7 +300,7 @@ Read from `[tool.blastradius]` in `pyproject.toml` and/or `.blastradius.toml`, e
 
 ## 9. Constraints for the implementing agent (hard rules)
 
-1. **Preserve the zero-dependency core.** Phases 0–2 add **no** runtime dependencies. `sqlite-vec` (Phase 3) is the only new dependency and must be an optional extra (`blastradius[semantic]`); the tool must run fully without it.
+1. **Preserve the zero-dependency core.** Phases 0–2 add **no** runtime dependencies. `sqlite-vec` (Phase 3) is the only new dependency and must be an optional extra (`blastradius-cli[semantic]`); the tool must run fully without it.
 2. **Respect the partitioning and dependency direction (§4.1).** `core/`, `store/`, and `temporal/` must never import from `graph/` or `semantic/`. The heavy layers depend on the core, never the reverse, and consume it only through its public store/graph API. This keeps a future extraction into a standalone package a clean lift. Any change that creates a core→heavy import is a hard failure.
 3. **Do not change the public JSON schema or existing CLI commands.** JSON output stays byte-compatible (golden-tested).
 4. **Deterministic extraction is sacred.** No LLM or heuristic inference of edges/symbols. Embeddings serve retrieval only.

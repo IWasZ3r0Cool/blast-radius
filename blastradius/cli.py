@@ -16,7 +16,7 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
         except ImportError:
-            print("watchdog not installed — run: pip install 'blastradius[watch]'", file=sys.stderr)
+            print("watchdog not installed — run: pip install 'blastradius-cli[watch]'", file=sys.stderr)
             sys.exit(1)
 
         import threading

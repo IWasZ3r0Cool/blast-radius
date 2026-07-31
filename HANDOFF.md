@@ -1,6 +1,6 @@
 # Engineering Handoff — blastradius Temporal Knowledge Graph
 
-**Repo:** `scheidydudes-github-repos/blastradius`  
+**Repo:** `IWasZ3r0Cool/blast-radius`  
 **Branch:** `main` (4 commits ahead of origin)  
 **Last commit:** `e863853` — Phase 2 temporal layer  
 **Test status:** 11/11 passing (`uv run pytest` or `.venv/bin/pytest`)

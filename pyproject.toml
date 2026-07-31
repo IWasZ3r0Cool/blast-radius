@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blastradius-cli"
-version = "0.3.6"
+version = "0.3.7"
 description = "Repo dependency analyzer with blast-radius impact scoring for AI-assisted development"
 readme = "README.md"
 license = "Apache-2.0"

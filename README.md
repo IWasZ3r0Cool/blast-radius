@@ -20,14 +20,14 @@ No build step. No npm. Zero required runtime dependencies — SQLite is stdlib.
 ## Install
 
 ```bash
-pip install blastradius
+pip install blastradius-cli
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/scheidydude/blastradius
-cd blastradius
+git clone https://github.com/IWasZ3r0Cool/blast-radius
+cd blast-radius
 pip install -e .
 ```
 
@@ -734,17 +734,17 @@ Kind abbreviations: `fn` function · `cls` class · `st` struct · `en` enum · 
 
 | Package | Purpose | Install |
 |---------|---------|---------|
-| `sqlite-vec` | Semantic vector search in `blastradius search` and `semantic_search` MCP tool | `pip install 'blastradius[semantic]'` |
-| `watchdog` | `--watch` file change detection | `pip install 'blastradius[watch]'` |
-| `PyYAML` | Better Docker Compose / CI YAML parsing | `pip install 'blastradius[yaml]'` |
-| `tomli` | Rust `Cargo.toml` on Python < 3.11 | `pip install 'blastradius[toml]'` |
+| `sqlite-vec` | Semantic vector search in `blastradius search` and `semantic_search` MCP tool | `pip install 'blastradius-cli[semantic]'` |
+| `watchdog` | `--watch` file change detection | `pip install 'blastradius-cli[watch]'` |
+| `PyYAML` | Better Docker Compose / CI YAML parsing | `pip install 'blastradius-cli[yaml]'` |
+| `tomli` | Rust `Cargo.toml` on Python < 3.11 | `pip install 'blastradius-cli[toml]'` |
 
 ### Semantic search configuration
 
 Semantic search requires a self-hosted embedding endpoint (Ollama, LM Studio, llama.cpp server, or any OpenAI-compatible `/v1/embeddings` API) and the `sqlite-vec` extension.
 
 ```bash
-pip install 'blastradius[semantic]'
+pip install 'blastradius-cli[semantic]'
 
 # Set env vars (add to your shell profile or .env)
 export BLASTRADIUS_EMBEDDING_ENDPOINT=http://localhost:11434
