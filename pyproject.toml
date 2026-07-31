@@ -3,12 +3,17 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "blastradius"
+name = "blastradius-cli"
 version = "0.3.6"
 description = "Repo dependency analyzer with blast-radius impact scoring for AI-assisted development"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 requires-python = ">=3.9"
+
+[project.urls]
+Homepage = "https://github.com/IWasZ3r0Cool/blast-radius"
+Repository = "https://github.com/IWasZ3r0Cool/blast-radius"
+Issues = "https://github.com/IWasZ3r0Cool/blast-radius/issues"
 
 [project.scripts]
 blastradius = "blastradius.cli:main"
