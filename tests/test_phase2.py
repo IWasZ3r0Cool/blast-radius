@@ -9,6 +9,7 @@ Acceptance criteria (from CKG-DESIGN-001):
   3. Full backfill completes without modifying the working tree;
      commits table is populated.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -19,6 +20,7 @@ FIXTURE_SRC = Path(__file__).parent / "fixtures" / "simple_python"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _git(repo: Path, *args: str) -> str:
     r = subprocess.run(
@@ -43,11 +45,13 @@ def _run_analyze(repo: Path) -> None:
     import importlib
 
     import blastradius.index as idx_mod
+
     importlib.reload(idx_mod)
     idx_mod.build(str(repo))
 
 
 # ── Fixture: add-dep then remove-dep history ─────────────────────────────────
+
 
 def _make_temporal_repo(tmp_path: Path) -> tuple[Path, str, str, str]:
     """Create repo: C1=baseline, C2=add edge B→A, C3=remove edge.
@@ -79,6 +83,7 @@ def _make_temporal_repo(tmp_path: Path) -> tuple[Path, str, str, str]:
 
 
 # ── Test 1: as_of_impact differs between C2 and HEAD ─────────────────────────
+
 
 def test_as_of_impact_differs_from_head(tmp_path: Path) -> None:
     """impact B --as-of C2 shows A as dependent; impact B at HEAD does not."""
@@ -113,6 +118,7 @@ def test_as_of_impact_differs_from_head(tmp_path: Path) -> None:
 
 # ── Test 2: changed_since lists added/removed edges ──────────────────────────
 
+
 def test_changed_since_edges(tmp_path: Path) -> None:
     """changed_since(reachable_C1) shows added edge at C2 and its removal."""
     from blastradius.index import db_path_for, git_reachable
@@ -135,6 +141,7 @@ def test_changed_since_edges(tmp_path: Path) -> None:
 
 
 # ── Test 3: history backfill populates commits table ─────────────────────────
+
 
 def test_history_backfill_commits(tmp_path: Path) -> None:
     """blastradius history populates the commits table."""
@@ -169,6 +176,7 @@ def test_history_backfill_commits(tmp_path: Path) -> None:
 
 # ── Test 4: history backfill sets first_seen_commit ──────────────────────────
 
+
 def test_history_backfill_first_seen(tmp_path: Path) -> None:
     """After backfill, files have first_seen_commit set."""
     from blastradius.index import db_path_for
@@ -200,6 +208,7 @@ def test_history_backfill_first_seen(tmp_path: Path) -> None:
 
 # ── Test 5: backfill never modifies working tree ─────────────────────────────
 
+
 def test_history_no_working_tree_change(tmp_path: Path) -> None:
     """git status is clean before and after backfill (no checkout side-effects)."""
     from blastradius.index import db_path_for
@@ -230,12 +239,15 @@ def test_history_no_working_tree_change(tmp_path: Path) -> None:
     # Git status should show clean (only .blastradius/ and generated files differ)
     status = subprocess.run(
         ["git", "status", "--porcelain", "--", "*.py"],
-        cwd=repo, capture_output=True, text=True,
+        cwd=repo,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     assert status == "", f"Working tree dirty after backfill:\n{status}"
 
 
 # ── Test 6: changed-since shows added file ────────────────────────────────────
+
 
 def test_changed_since_added_file(tmp_path: Path) -> None:
     """changed_since(C1) shows a file added at C2."""

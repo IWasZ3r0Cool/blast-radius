@@ -1,4 +1,5 @@
 """Minimal HTTP server for the blastradius visualization UI."""
+
 from __future__ import annotations
 
 import json
@@ -10,12 +11,13 @@ from pathlib import Path
 HERE = Path(__file__).parent
 VIZ_HTML = HERE.parent / "viz" / "explorer.html"
 
-REPO_PATH  = "."
+REPO_PATH = "."
 INDEX_FILE: Path = Path("blastradius.json")
 
 
 def _run_analysis(repo_path: str, output: Path) -> bool:
     from blastradius.index import build
+
     try:
         build(repo_path, output)
         return True
@@ -59,7 +61,12 @@ class _Handler(BaseHTTPRequestHandler):
             if INDEX_FILE.exists():
                 self._send_file(INDEX_FILE, "application/json")
             else:
-                self._send_json({"error": "blastradius.json not found — run: blastradius analyze <repo>"}, 404)
+                self._send_json(
+                    {
+                        "error": "blastradius.json not found — run: blastradius analyze <repo>"
+                    },
+                    404,
+                )
 
         elif path == "/refresh":
             ok = _run_analysis(REPO_PATH, INDEX_FILE)
@@ -74,13 +81,30 @@ def _start_watcher(repo_path: str) -> None:
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer
     except ImportError:
-        print("watchdog not installed — run: pip install 'blastradius-cli[watch]'", file=sys.stderr)
+        print(
+            "watchdog not installed — run: pip install 'blastradius-cli[watch]'",
+            file=sys.stderr,
+        )
         return
 
     WATCHED_EXTS = {
-        ".py", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs",
-        ".rb", ".go", ".rs", ".java", ".kt", ".php",
-        ".yml", ".yaml", ".sql", ".prisma",
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".mjs",
+        ".cjs",
+        ".rb",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".php",
+        ".yml",
+        ".yaml",
+        ".sql",
+        ".prisma",
     }
 
     class _Watcher(FileSystemEventHandler):
@@ -107,9 +131,11 @@ def _start_watcher(repo_path: str) -> None:
     print(f"[watch] watching {repo_path}", file=sys.stderr)
 
 
-def serve(repo_path: str, port: int = 8080, watch: bool = False, output: Path | None = None) -> None:
+def serve(
+    repo_path: str, port: int = 8080, watch: bool = False, output: Path | None = None
+) -> None:
     global REPO_PATH, INDEX_FILE
-    REPO_PATH  = repo_path
+    REPO_PATH = repo_path
     INDEX_FILE = output or (Path(repo_path).resolve() / "blastradius.json")
 
     print(f"Analyzing {repo_path} …", file=sys.stderr)
@@ -119,7 +145,9 @@ def serve(repo_path: str, port: int = 8080, watch: bool = False, output: Path | 
         _start_watcher(repo_path)
 
     server = HTTPServer(("", port), _Handler)
-    print(f"\nServing at http://localhost:{port}/\n  repo: {repo_path}\n  index: {INDEX_FILE}\n")
+    print(
+        f"\nServing at http://localhost:{port}/\n  repo: {repo_path}\n  index: {INDEX_FILE}\n"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

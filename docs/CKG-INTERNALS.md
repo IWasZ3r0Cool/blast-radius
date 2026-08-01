@@ -72,10 +72,10 @@ for lang in detected_langs:
 All analyzers return the same 4-tuple:
 
 ```python
-nodes: list[dict]            # repo-internal files
-external_nodes: list[dict]   # external packages (type="import")
+nodes: list[dict]  # repo-internal files
+external_nodes: list[dict]  # external packages (type="import")
 links_map: dict[tuple, int]  # {(source_id, target_id): weight}
-meta: dict                   # {"total_files": N, "total_loc": M, "framework": "..."}
+meta: dict  # {"total_files": N, "total_loc": M, "framework": "..."}
 ```
 
 ### 2.4 Node schema (minimal)
@@ -109,13 +109,15 @@ After enrichment, nodes also carry: `blast_score`, `direct_dependents`, `transit
 ```python
 def build(repo_path, output):
     root = Path(repo_path).resolve()
-    data = analyze(str(root))                        # language detection + parsing
+    data = analyze(str(root))  # language detection + parsing
     blast = compute_blast_radius(data["nodes"], data["links"])  # impact.py:6–68
-    enrich_nodes(data["nodes"], blast)               # impact.py:71–78 — mutates nodes
-    enrich_links(data["nodes"], data["links"])        # impact.py:81–99 — adds imports/imported_by
+    enrich_nodes(data["nodes"], blast)  # impact.py:71–78 — mutates nodes
+    enrich_links(
+        data["nodes"], data["links"]
+    )  # impact.py:81–99 — adds imports/imported_by
     data["meta"]["indexed"] = True
     dest = output or (root / INDEX_FILENAME)
-    dest.write_text(json.dumps(data, indent=2))      # writes blastradius.json
+    dest.write_text(json.dumps(data, indent=2))  # writes blastradius.json
 ```
 
 `INDEX_FILENAME = "blastradius.json"` (index.py top).
@@ -230,14 +232,14 @@ Entry point: `main()` at line 349. Argparse subparsers (line 265–346).
 
 ```python
 dispatch = {
-    "analyze":      _cmd_analyze,      # line 9 — calls index.build(); --watch mode
-    "impact":       _cmd_impact,       # line 64 — blast report for one file
-    "serve":        _cmd_serve,        # line 125 — MCP or viz server
-    "symbols":      _cmd_symbols,      # line 140 — build symbol index
-    "lookup":       _cmd_lookup,       # line 172 — symbol lookup by name
-    "dependencies": _cmd_dependencies, # line 188 — imports/imported_by for a file
-    "high-blast":   _cmd_high_blast,   # line 226 — list files above threshold
-    "install-hook": _cmd_install_hook, # line 254 — git pre-commit hook
+    "analyze": _cmd_analyze,  # line 9 — calls index.build(); --watch mode
+    "impact": _cmd_impact,  # line 64 — blast report for one file
+    "serve": _cmd_serve,  # line 125 — MCP or viz server
+    "symbols": _cmd_symbols,  # line 140 — build symbol index
+    "lookup": _cmd_lookup,  # line 172 — symbol lookup by name
+    "dependencies": _cmd_dependencies,  # line 188 — imports/imported_by for a file
+    "high-blast": _cmd_high_blast,  # line 226 — list files above threshold
+    "install-hook": _cmd_install_hook,  # line 254 — git pre-commit hook
 }
 ```
 

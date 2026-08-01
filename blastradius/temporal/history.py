@@ -4,6 +4,7 @@
 
 Dependency rule: must not import from blastradius.graph or blastradius.semantic.
 """
+
 from __future__ import annotations
 
 import ast
@@ -18,12 +19,21 @@ _JS_IMPORT_RE = re.compile(
 )
 
 # Extensions we attempt to parse for imports
-_PARSEABLE = frozenset({
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs",
-})
+_PARSEABLE = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".mjs",
+        ".cjs",
+    }
+)
 
 
 # ── git plumbing helpers ──────────────────────────────────────────────────────
+
 
 def _run(cmd: list, cwd: Path, timeout: int = 60) -> str:
     r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
@@ -37,7 +47,8 @@ def git_log(
 ) -> list[dict]:
     """Return commits oldest→newest within the requested bounds."""
     cmd = [
-        "git", "log",
+        "git",
+        "log",
         "--format=%H%x00%ae%x00%aI%x00%cI%x00%P%x00%s",
         "--reverse",
     ]
@@ -56,14 +67,16 @@ def git_log(
             continue
         hash_, author, authored_at, committed_at, parents, message = parts[:6]
         parent_hash = parents.split()[0] if parents.strip() else None
-        commits.append({
-            "hash": hash_,
-            "author": author,
-            "authored_at": authored_at,
-            "committed_at": committed_at,
-            "parent_hash": parent_hash,
-            "message": message,
-        })
+        commits.append(
+            {
+                "hash": hash_,
+                "author": author,
+                "authored_at": authored_at,
+                "committed_at": committed_at,
+                "parent_hash": parent_hash,
+                "message": message,
+            }
+        )
     return commits
 
 
@@ -122,6 +135,7 @@ def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, str]:
 
 
 # ── lightweight import extractor ──────────────────────────────────────────────
+
 
 def _python_imports(rel_path: str, content: str, known_files: set) -> list[str]:
     """Extract Python imports that resolve to files in known_files."""
@@ -219,6 +233,7 @@ def _is_parseable(rel_path: str) -> bool:
 
 # ── backfill ──────────────────────────────────────────────────────────────────
 
+
 def backfill(
     root: Path,
     store: object,  # blastradius.store.Store — avoid circular import
@@ -242,7 +257,7 @@ def backfill(
 
     # Forward pass: oldest→newest
     # Track per-path: first commit seen, last commit seen (while alive)
-    file_first_seen: dict[str, str] = {}   # path → hash
+    file_first_seen: dict[str, str] = {}  # path → hash
     file_last_seen_alive: dict[str, str] = {}  # path → hash (last commit where present)
 
     # Track edge presence: (source, target, kind) → first hash, last alive hash
@@ -268,8 +283,7 @@ def backfill(
         # ── edge extraction for changed (added/modified) files ─────────────────
         added = {p for p in curr_tree if p not in prev_tree}
         modified = {
-            p for p in curr_tree
-            if p in prev_tree and curr_tree[p] != prev_tree[p]
+            p for p in curr_tree if p in prev_tree and curr_tree[p] != prev_tree[p]
         }
         changed = added | modified
 

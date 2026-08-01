@@ -1,4 +1,5 @@
 """PHP repository analyzer."""
+
 import json
 import re
 from pathlib import Path
@@ -7,17 +8,19 @@ from .base import dir_group, is_ignored, is_skip_dir, load_gitignore_patterns
 
 # ── Regexes ───────────────────────────────────────────────────────────────────
 # require/include (with or without _once)
-_REQUIRE_RE   = re.compile(r"""(?:require|include)(?:_once)?\s+['"]([^'"]+)['"]""", re.IGNORECASE)
+_REQUIRE_RE = re.compile(
+    r"""(?:require|include)(?:_once)?\s+['"]([^'"]+)['"]""", re.IGNORECASE
+)
 # Namespace use statement:  use Foo\Bar\Baz;  or  use Foo\Bar\Baz as Alias;
-_USE_RE       = re.compile(r'^use\s+([\w\\]+)(?:\s+as\s+\w+)?\s*;', re.MULTILINE)
+_USE_RE = re.compile(r"^use\s+([\w\\]+)(?:\s+as\s+\w+)?\s*;", re.MULTILINE)
 # Namespace declaration
-_NAMESPACE_RE = re.compile(r'^namespace\s+([\w\\]+)\s*;', re.MULTILINE)
+_NAMESPACE_RE = re.compile(r"^namespace\s+([\w\\]+)\s*;", re.MULTILINE)
 
-_ROUTE_DIRS    = {"controllers", "http", "routes", "api", "endpoints"}
-_STORE_DIRS    = {"models", "entities", "repositories", "services"}
-_STORE_STEMS   = {"model", "entity", "repository", "service", "provider"}
-_CONFIG_DIRS   = {"config", "configuration"}
-_CONFIG_STEMS  = {"config", "bootstrap", "app", "routes", "kernel", "middleware"}
+_ROUTE_DIRS = {"controllers", "http", "routes", "api", "endpoints"}
+_STORE_DIRS = {"models", "entities", "repositories", "services"}
+_STORE_STEMS = {"model", "entity", "repository", "service", "provider"}
+_CONFIG_DIRS = {"config", "configuration"}
+_CONFIG_STEMS = {"config", "bootstrap", "app", "routes", "kernel", "middleware"}
 
 
 def collect_files(root: Path, patterns: list):
@@ -71,13 +74,15 @@ def read_psr4_map(root: Path):
 
 def node_type(path: Path) -> str:
     parts_lower = [p.lower() for p in path.parts]
-    stem_lower  = path.stem.lower()
+    stem_lower = path.stem.lower()
 
     if any(p in _CONFIG_DIRS for p in parts_lower) or stem_lower in _CONFIG_STEMS:
         return "config"
     if any(p in _ROUTE_DIRS for p in parts_lower) or stem_lower.endswith("controller"):
         return "route"
-    if any(p in _STORE_DIRS for p in parts_lower) or any(stem_lower.endswith(s) for s in _STORE_STEMS):
+    if any(p in _STORE_DIRS for p in parts_lower) or any(
+        stem_lower.endswith(s) for s in _STORE_STEMS
+    ):
         return "store"
     return "module"
 
@@ -86,7 +91,7 @@ def resolve_internal(mod: str, file_path: Path, root: Path, all_files: set):
     """Resolve a require/include path to a repo-relative .php file."""
     # Relative path
     base = file_path.parent
-    raw  = (base / mod).resolve()
+    raw = (base / mod).resolve()
     try:
         rel = str(raw.relative_to(root))
         if rel in all_files:
@@ -107,8 +112,8 @@ def namespace_to_path(ns_class: str, psr4_map: dict, all_files: set, root: Path)
     for ns, base_dir in psr4_map.items():
         ns_path = ns.replace("\\", "/")
         if parts.startswith(ns_path + "/") or parts == ns_path:
-            rel_suffix = parts[len(ns_path):].lstrip("/")
-            candidate  = f"{base_dir}/{rel_suffix}.php"
+            rel_suffix = parts[len(ns_path) :].lstrip("/")
+            candidate = f"{base_dir}/{rel_suffix}.php"
             if candidate in all_files:
                 return candidate
     # Fallback: check if any file path suffix matches
@@ -120,18 +125,18 @@ def namespace_to_path(ns_class: str, psr4_map: dict, all_files: set, root: Path)
 
 
 def analyze(root: Path, group_map: dict):
-    patterns  = load_gitignore_patterns(root)
+    patterns = load_gitignore_patterns(root)
     php_files = collect_files(root, patterns)
     framework = detect_framework(root)
-    psr4_map  = read_psr4_map(root)
+    psr4_map = read_psr4_map(root)
 
     if not php_files:
         return [], [], {}, {"total_files": 0, "total_loc": 0}
 
-    all_rel   = {str(f.relative_to(root)) for f in php_files}
-    nodes     = []
+    all_rel = {str(f.relative_to(root)) for f in php_files}
+    nodes = []
     links_map = {}
-    ext_pkgs  = {}
+    ext_pkgs = {}
     total_loc = 0
 
     for f in php_files:
@@ -145,19 +150,21 @@ def analyze(root: Path, group_map: dict):
         total_loc += loc
 
         require_mods = [m.group(1) for m in _REQUIRE_RE.finditer(source)]
-        use_mods     = [m.group(1) for m in _USE_RE.finditer(source)]
-        all_mods     = list(dict.fromkeys(require_mods + use_mods))
+        use_mods = [m.group(1) for m in _USE_RE.finditer(source)]
+        all_mods = list(dict.fromkeys(require_mods + use_mods))
 
-        nodes.append({
-            "id":        rel,
-            "type":      node_type(f),
-            "language":  "php",
-            "framework": framework,
-            "size":      loc,
-            "loc":       loc,
-            "group":     dir_group(f, root, group_map),
-            "imports":   len(all_mods),
-        })
+        nodes.append(
+            {
+                "id": rel,
+                "type": node_type(f),
+                "language": "php",
+                "framework": framework,
+                "size": loc,
+                "loc": loc,
+                "group": dir_group(f, root, group_map),
+                "imports": len(all_mods),
+            }
+        )
 
         for mod in require_mods:
             internal = resolve_internal(mod, f, root, all_rel)
@@ -173,16 +180,16 @@ def analyze(root: Path, group_map: dict):
             else:
                 # External vendor package — top two namespace parts
                 parts = ns_class.split("\\")
-                pkg   = "\\".join(parts[:2]) if len(parts) >= 2 else parts[0]
+                pkg = "\\".join(parts[:2]) if len(parts) >= 2 else parts[0]
                 if pkg not in ext_pkgs:
                     ext_pkgs[pkg] = {
-                        "id":       pkg,
-                        "type":     "import",
+                        "id": pkg,
+                        "type": "import",
                         "language": "php",
-                        "size":     40,
-                        "loc":      0,
-                        "group":    9000,
-                        "imports":  0,
+                        "size": 40,
+                        "loc": 0,
+                        "group": 9000,
+                        "imports": 0,
                     }
                 key = (rel, pkg)
                 links_map[key] = links_map.get(key, 0) + 1

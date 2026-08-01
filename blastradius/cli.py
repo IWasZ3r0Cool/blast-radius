@@ -1,4 +1,5 @@
 """blastradius CLI entry point."""
+
 from __future__ import annotations
 
 import argparse
@@ -9,6 +10,7 @@ from pathlib import Path
 
 def _cmd_analyze(args: argparse.Namespace) -> None:
     from blastradius.index import build
+
     repo = args.repo
     output = Path(args.output) if args.output else None
 
@@ -17,15 +19,32 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             from watchdog.events import FileSystemEventHandler
             from watchdog.observers import Observer
         except ImportError:
-            print("watchdog not installed — run: pip install 'blastradius-cli[watch]'", file=sys.stderr)
+            print(
+                "watchdog not installed — run: pip install 'blastradius-cli[watch]'",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         import threading
 
         WATCHED_EXTS = {
-            ".py", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs",
-            ".rb", ".go", ".rs", ".java", ".kt", ".php",
-            ".yml", ".yaml", ".sql", ".prisma",
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".mjs",
+            ".cjs",
+            ".rb",
+            ".go",
+            ".rs",
+            ".java",
+            ".kt",
+            ".php",
+            ".yml",
+            ".yaml",
+            ".sql",
+            ".prisma",
         }
         dest = output or (Path(repo).resolve() / "blastradius.json")
 
@@ -54,6 +73,7 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         try:
             while True:
                 import time
+
                 time.sleep(1)
         except KeyboardInterrupt:
             observer.stop()
@@ -86,7 +106,10 @@ def _cmd_impact(args: argparse.Namespace) -> None:
             # Try discovering from cwd upward
             db_path = find_db(Path.cwd())
         if not db_path or not db_path.exists():
-            print("No .blastradius/index.db found — run: blastradius analyze <repo>", file=sys.stderr)
+            print(
+                "No .blastradius/index.db found — run: blastradius analyze <repo>",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         # Resolve repo root from DB meta
@@ -136,15 +159,20 @@ def _cmd_impact(args: argparse.Namespace) -> None:
 
         total = len(all_paths)
         if args.json:
-            print(json.dumps({
-                "file":                  file_id,
-                "as_of":                 as_of,
-                "blast_score":           blast["blast_score"],
-                "direct_dependents":     blast["direct_dependents"],
-                "transitive_dependents": blast["transitive_dependents"],
-                "direct_ids":            blast["direct_ids"],
-                "transitive_ids":        blast["transitive_ids"],
-            }, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "file": file_id,
+                        "as_of": as_of,
+                        "blast_score": blast["blast_score"],
+                        "direct_dependents": blast["direct_dependents"],
+                        "transitive_dependents": blast["transitive_dependents"],
+                        "direct_ids": blast["direct_ids"],
+                        "transitive_ids": blast["transitive_ids"],
+                    },
+                    indent=2,
+                )
+            )
         else:
             print(f"[as-of {as_of[:12]}]  ", end="")
             print(format_stdout(file_id, blast, total))
@@ -194,14 +222,19 @@ def _cmd_impact(args: argparse.Namespace) -> None:
         Path(args.out).write_text(report)
         print(f"Impact report written to {args.out}")
     elif args.json:
-        print(json.dumps({
-            "file":                 file_id,
-            "blast_score":          blast["blast_score"],
-            "direct_dependents":    blast["direct_dependents"],
-            "transitive_dependents": blast["transitive_dependents"],
-            "direct_ids":           blast["direct_ids"],
-            "transitive_ids":       blast["transitive_ids"],
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "file": file_id,
+                    "blast_score": blast["blast_score"],
+                    "direct_dependents": blast["direct_dependents"],
+                    "transitive_dependents": blast["transitive_dependents"],
+                    "direct_ids": blast["direct_ids"],
+                    "transitive_ids": blast["transitive_ids"],
+                },
+                indent=2,
+            )
+        )
     else:
         print(format_stdout(file_id, blast, total))
 
@@ -209,9 +242,11 @@ def _cmd_impact(args: argparse.Namespace) -> None:
 def _cmd_serve(args: argparse.Namespace) -> None:
     if args.mcp:
         from blastradius.mcp_server import serve
+
         serve()
     else:
         from blastradius.viz_server import serve
+
         output = Path(args.output) if getattr(args, "output", None) else None
         serve(
             repo_path=args.repo,
@@ -252,7 +287,9 @@ def _cmd_symbols(args: argparse.Namespace) -> None:
         write_standalone(symbol_data, output)
 
     if args.claude_md:
-        claude_path = Path(args.claude_md_path) if args.claude_md_path else (repo / "CLAUDE.md")
+        claude_path = (
+            Path(args.claude_md_path) if args.claude_md_path else (repo / "CLAUDE.md")
+        )
         write_claude_md(symbol_data, claude_path, exported_only=not args.all_symbols)
 
 
@@ -273,9 +310,9 @@ def _cmd_lookup(args: argparse.Namespace) -> None:
             store.close()
             matches = [
                 {
-                    "file":     r["file"],
-                    "line":     r["line"],
-                    "kind":     r["kind"],
+                    "file": r["file"],
+                    "line": r["line"],
+                    "kind": r["kind"],
                     "exported": r["exported"],
                 }
                 for r in rows
@@ -285,25 +322,32 @@ def _cmd_lookup(args: argparse.Namespace) -> None:
     if not matches and not args.index:
         try:
             from blastradius.mcp_server import _resolve_symbol_index
+
             sym_data = _resolve_symbol_index(None)
             matches = sym_data.get("symbols", {}).get(name, [])
         except FileNotFoundError:
             pass
     elif not matches and args.index:
         from blastradius.mcp_server import _resolve_symbol_index
+
         sym_data = _resolve_symbol_index(args.index)
         matches = sym_data.get("symbols", {}).get(name, [])
 
     if not matches:
         print(f"Symbol `{name}` not found in index.", file=sys.stderr)
-        print("(Only symbols defined in this repo are indexed; third-party imports are not.)", file=sys.stderr)
+        print(
+            "(Only symbols defined in this repo are indexed; third-party imports are not.)",
+            file=sys.stderr,
+        )
         sys.exit(1)
     if args.json:
         print(json.dumps({"name": name, "matches": matches}, indent=2))
     else:
         repo_root = index_path.parent if index_path else Path.cwd()
         for m in matches:
-            methods = f"  methods: {', '.join(m['methods'])}" if m.get("methods") else ""
+            methods = (
+                f"  methods: {', '.join(m['methods'])}" if m.get("methods") else ""
+            )
             print(f"{m['file']}:{m['line']}  {name}  ({m.get('kind', '?')}){methods}")
             # Print a short snippet around the definition
             src = repo_root / m["file"]
@@ -320,30 +364,43 @@ def _cmd_lookup(args: argparse.Namespace) -> None:
 
 def _cmd_dependencies(args: argparse.Namespace) -> None:
     from blastradius.index import INDEX_FILENAME, find_index, load
+
     if args.index:
         index_path = Path(args.index)
     else:
         index_path = find_index(Path(args.file).parent) or find_index(Path.cwd())
         if not index_path:
-            print(f"No {INDEX_FILENAME} found. Run: blastradius analyze <repo>", file=sys.stderr)
+            print(
+                f"No {INDEX_FILENAME} found. Run: blastradius analyze <repo>",
+                file=sys.stderr,
+            )
             sys.exit(1)
     data = load(index_path)
     fp = args.file
     clean = fp.lstrip("./")
     node = next(
-        (n for n in data["nodes"] if n["id"] == fp or n["id"].endswith(clean) or clean.endswith(n["id"])),
+        (
+            n
+            for n in data["nodes"]
+            if n["id"] == fp or n["id"].endswith(clean) or clean.endswith(n["id"])
+        ),
         None,
     )
     if not node:
         print(f"File not found in index: {fp}", file=sys.stderr)
         sys.exit(1)
     if args.json:
-        print(json.dumps({
-            "file":        node["id"],
-            "imports":     node.get("imports", []),
-            "imported_by": node.get("imported_by", []),
-            "blast_score": node.get("blast_score", 0),
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "file": node["id"],
+                    "imports": node.get("imports", []),
+                    "imported_by": node.get("imported_by", []),
+                    "blast_score": node.get("blast_score", 0),
+                },
+                indent=2,
+            )
+        )
     else:
         print(f"File: {node['id']}  (blast score: {node.get('blast_score', 0):.1f})")
         imports = node.get("imports", [])
@@ -358,35 +415,59 @@ def _cmd_dependencies(args: argparse.Namespace) -> None:
 
 def _cmd_high_blast(args: argparse.Namespace) -> None:
     from blastradius.index import INDEX_FILENAME, find_index, load
+
     if args.index:
         index_path = Path(args.index)
     else:
         index_path = find_index(Path.cwd())
         if not index_path:
-            print(f"No {INDEX_FILENAME} found. Run: blastradius analyze <repo>", file=sys.stderr)
+            print(
+                f"No {INDEX_FILENAME} found. Run: blastradius analyze <repo>",
+                file=sys.stderr,
+            )
             sys.exit(1)
     data = load(index_path)
     threshold = args.threshold
     _NON_FILE_TYPES = {"import", "service", "pipeline", "database"}
     results = sorted(
-        [n for n in data["nodes"]
-         if n.get("blast_score", 0) >= threshold and n.get("type") not in _NON_FILE_TYPES],
-        key=lambda n: n["blast_score"], reverse=True,
+        [
+            n
+            for n in data["nodes"]
+            if n.get("blast_score", 0) >= threshold
+            and n.get("type") not in _NON_FILE_TYPES
+        ],
+        key=lambda n: n["blast_score"],
+        reverse=True,
     )
     if args.json:
-        print(json.dumps({"threshold": threshold, "count": len(results), "files": [
-            {"file": n["id"], "blast_score": n["blast_score"],
-             "loc": n.get("loc", 0),
-             "direct": n.get("direct_dependents", 0), "transitive": n.get("transitive_dependents", 0)}
-            for n in results
-        ]}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "threshold": threshold,
+                    "count": len(results),
+                    "files": [
+                        {
+                            "file": n["id"],
+                            "blast_score": n["blast_score"],
+                            "loc": n.get("loc", 0),
+                            "direct": n.get("direct_dependents", 0),
+                            "transitive": n.get("transitive_dependents", 0),
+                        }
+                        for n in results
+                    ],
+                },
+                indent=2,
+            )
+        )
     else:
         print(f"Files with blast score >= {threshold}  ({len(results)} found)\n")
         for n in results:
             loc = n.get("loc", 0)
             loc_str = f"  {loc} loc" if loc else ""
-            print(f"  {n['blast_score']:>6.1f}  {n['id']}"
-                  f"  ({n.get('direct_dependents', 0)}d / {n.get('transitive_dependents', 0)}t){loc_str}")
+            print(
+                f"  {n['blast_score']:>6.1f}  {n['id']}"
+                f"  ({n.get('direct_dependents', 0)}d / {n.get('transitive_dependents', 0)}t){loc_str}"
+            )
 
 
 def _cmd_symbol_blast(args: argparse.Namespace) -> None:
@@ -397,10 +478,14 @@ def _cmd_symbol_blast(args: argparse.Namespace) -> None:
 
     db_path = find_db(Path.cwd())
     if not db_path or not db_path.exists():
-        print("No .blastradius/index.db found — run: blastradius analyze <repo>", file=sys.stderr)
+        print(
+            "No .blastradius/index.db found — run: blastradius analyze <repo>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     from blastradius.store import Store
+
     store = Store(db_path)
     file_path = args.file
 
@@ -430,17 +515,21 @@ def _cmd_symbol_blast(args: argparse.Namespace) -> None:
         for sym in exports:
             name = sym["name"]
             # Word-boundary match so "auth" doesn't match "authenticate".
-            if _re.search(r'\b' + _re.escape(name) + r'\b', src):
+            if _re.search(r"\b" + _re.escape(name) + r"\b", src):
                 usage[name].append(imp)
 
     if args.json:
-        print(json.dumps({
-            "file": file_path,
-            "exports": [
-                {**sym, "used_by": usage[sym["name"]]}
-                for sym in exports
-            ],
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "file": file_path,
+                    "exports": [
+                        {**sym, "used_by": usage[sym["name"]]} for sym in exports
+                    ],
+                },
+                indent=2,
+            )
+        )
     else:
         print(f"Symbol-level blast radius: {file_path}\n")
         print(f"  {len(exports)} exported symbol(s), {len(importers)} importer(s)\n")
@@ -460,7 +549,10 @@ def _cmd_db(args: argparse.Namespace) -> None:
 
     db_path = Path(args.db) if getattr(args, "db", None) else find_db(Path.cwd())
     if not db_path or not db_path.exists():
-        print("No .blastradius/index.db found — run: blastradius analyze <repo>", file=sys.stderr)
+        print(
+            "No .blastradius/index.db found — run: blastradius analyze <repo>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if args.db_command == "status":
@@ -519,7 +611,10 @@ def _cmd_changed_since(args: argparse.Namespace) -> None:
 
     db_path = Path(args.db) if getattr(args, "db", None) else find_db(Path.cwd())
     if not db_path or not db_path.exists():
-        print("No .blastradius/index.db found — run: blastradius analyze <repo>", file=sys.stderr)
+        print(
+            "No .blastradius/index.db found — run: blastradius analyze <repo>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     repo = Path(args.repo).resolve() if getattr(args, "repo", None) else Path.cwd()
@@ -544,15 +639,21 @@ def _cmd_changed_since(args: argparse.Namespace) -> None:
     modified = git_modified(repo, full_hash)
     added_set = set(result.get("added_files", []))
     removed_set = set(result.get("removed_files", []))
-    result["modified_files"] = [f for f in modified if f not in added_set and f not in removed_set]
+    result["modified_files"] = [
+        f for f in modified if f not in added_set and f not in removed_set
+    ]
 
     # Filter edges to only those touching the changed file set — the full graph diff is noise.
     touched = added_set | removed_set | set(result["modified_files"])
     all_ae = result["added_edges"]
     all_re = result["removed_edges"]
-    ae_filtered = [e for e in all_ae if e["source"] in touched or e["target"] in touched]
-    re_filtered = [e for e in all_re if e["source"] in touched or e["target"] in touched]
-    result["added_edges"]   = ae_filtered
+    ae_filtered = [
+        e for e in all_ae if e["source"] in touched or e["target"] in touched
+    ]
+    re_filtered = [
+        e for e in all_re if e["source"] in touched or e["target"] in touched
+    ]
+    result["added_edges"] = ae_filtered
     result["removed_edges"] = re_filtered
     suppressed = (len(all_ae) - len(ae_filtered)) + (len(all_re) - len(re_filtered))
     if suppressed:
@@ -561,7 +662,8 @@ def _cmd_changed_since(args: argparse.Namespace) -> None:
     # Count added edges whose first_seen_commit matches last analyze HEAD —
     # these may be initial-indexing artifacts rather than genuine new coupling.
     analyze_origin_count = sum(
-        1 for e in ae_filtered
+        1
+        for e in ae_filtered
         if last_indexed and e.get("first_seen_commit") == last_indexed
     )
 
@@ -598,16 +700,22 @@ def _cmd_changed_since(args: argparse.Namespace) -> None:
             for e in re_:
                 print(f"    - {e['source']} → {e['target']}  [{e['kind']}]")
         if suppressed:
-            print(f"\n  ({suppressed} unrelated edge changes omitted — run with --json to see all)")
+            print(
+                f"\n  ({suppressed} unrelated edge changes omitted — run with --json to see all)"
+            )
         if analyze_origin_count and ae:
             if result.get("warning"):
                 # history has never been run — backfill will resolve these
-                print(f"\n  ({analyze_origin_count} of {len(ae)} added edge(s) first seen at last-analyzed HEAD"
-                      f" — run `blastradius history` to date them accurately)")
+                print(
+                    f"\n  ({analyze_origin_count} of {len(ae)} added edge(s) first seen at last-analyzed HEAD"
+                    f" — run `blastradius history` to date them accurately)"
+                )
             else:
                 # history has been run; these edges predate the first analyze
-                print(f"\n  ({analyze_origin_count} of {len(ae)} added edge(s) are bootstrap-gap artifacts:"
-                      f" they existed before the first `blastradius analyze` and cannot be dated further)")
+                print(
+                    f"\n  ({analyze_origin_count} of {len(ae)} added edge(s) are bootstrap-gap artifacts:"
+                    f" they existed before the first `blastradius analyze` and cannot be dated further)"
+                )
         if not any([mf, af, rf, ae, re_]):
             print("  (no changes detected)")
 
@@ -619,13 +727,17 @@ def _cmd_search(args: argparse.Namespace) -> None:
 
     db_path = Path(args.db) if getattr(args, "db", None) else find_db(Path.cwd())
     if not db_path or not db_path.exists():
-        print("No .blastradius/index.db found — run: blastradius analyze <repo>", file=sys.stderr)
+        print(
+            "No .blastradius/index.db found — run: blastradius analyze <repo>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     store = Store(db_path)
 
     provider = None
     import os
+
     endpoint = os.environ.get("BLASTRADIUS_EMBEDDING_ENDPOINT", "")
     model = os.environ.get("BLASTRADIUS_EMBEDDING_MODEL", "")
     dims_str = os.environ.get("BLASTRADIUS_EMBEDDING_DIMS", "")
@@ -633,7 +745,10 @@ def _cmd_search(args: argparse.Namespace) -> None:
         try:
             dims = int(dims_str)
             from blastradius.semantic.provider import OpenAIEmbeddingProvider
-            provider = OpenAIEmbeddingProvider(endpoint=endpoint, model=model, dims=dims)
+
+            provider = OpenAIEmbeddingProvider(
+                endpoint=endpoint, model=model, dims=dims
+            )
         except Exception:
             pass
 
@@ -661,8 +776,11 @@ def _cmd_search(args: argparse.Namespace) -> None:
     if args.json:
         # Augment JSON output with file-level aggregation
         from collections import Counter
+
         file_counts = Counter(r["file"] for r in results)
-        files_ranked = [{"file": f, "symbol_hits": c} for f, c in file_counts.most_common()]
+        files_ranked = [
+            {"file": f, "symbol_hits": c} for f, c in file_counts.most_common()
+        ]
         print(json.dumps({"files": files_ranked, "symbols": results}, indent=2))
     else:
         if not results:
@@ -670,6 +788,7 @@ def _cmd_search(args: argparse.Namespace) -> None:
             return
         # File-level summary first — easier to scan for discovery queries
         from collections import Counter
+
         file_counts = Counter(r["file"] for r in results)
         print("Files:")
         for f, count in file_counts.most_common():
@@ -678,13 +797,16 @@ def _cmd_search(args: argparse.Namespace) -> None:
         print("\nSymbols:")
         for r in results:
             sig = f"  {r['signature']}" if r.get("signature") else ""
-            print(f"  {r['file']}:{r['line']}  {r['name']}  ({r.get('kind', '?')}){sig}")
+            print(
+                f"  {r['file']}:{r['line']}  {r['name']}  ({r.get('kind', '?')}){sig}"
+            )
             if r.get("doc"):
                 print(f"    {r['doc'][:120]}")
 
 
 def _cmd_install_hook(args: argparse.Namespace) -> None:
     from blastradius.hook import install
+
     install(
         repo_path=args.repo,
         threshold=args.threshold,
@@ -701,38 +823,69 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     # ── analyze ────────────────────────────────────────────────────────────
-    p_analyze = sub.add_parser("analyze", help="Analyze a repo and write blastradius.json")
-    p_analyze.add_argument("repo", nargs="?", default=".", help="Path to repo root (default: .)")
-    p_analyze.add_argument("--output", help="Output path (default: <repo>/blastradius.json)")
-    p_analyze.add_argument("--watch", action="store_true", help="Re-index on file changes")
+    p_analyze = sub.add_parser(
+        "analyze", help="Analyze a repo and write blastradius.json"
+    )
+    p_analyze.add_argument(
+        "repo", nargs="?", default=".", help="Path to repo root (default: .)"
+    )
+    p_analyze.add_argument(
+        "--output", help="Output path (default: <repo>/blastradius.json)"
+    )
+    p_analyze.add_argument(
+        "--watch", action="store_true", help="Re-index on file changes"
+    )
 
     # ── impact ─────────────────────────────────────────────────────────────
     p_impact = sub.add_parser("impact", help="Show blast-radius impact for a file")
     p_impact.add_argument("file", help="File path to assess")
-    p_impact.add_argument("--index", help="Path to blastradius.json (auto-discovered if omitted)")
+    p_impact.add_argument(
+        "--index", help="Path to blastradius.json (auto-discovered if omitted)"
+    )
     p_impact.add_argument("--out", help="Write markdown report to this file")
     p_impact.add_argument("--json", action="store_true", help="Output raw JSON")
-    p_impact.add_argument("--as-of", dest="as_of", metavar="REF",
-                          help="Compute blast radius at this historical commit/ref")
+    p_impact.add_argument(
+        "--as-of",
+        dest="as_of",
+        metavar="REF",
+        help="Compute blast radius at this historical commit/ref",
+    )
 
     # ── serve ──────────────────────────────────────────────────────────────
-    p_serve = sub.add_parser("serve", help="Serve the visualization UI or run as MCP server")
+    p_serve = sub.add_parser(
+        "serve", help="Serve the visualization UI or run as MCP server"
+    )
     serve_mode = p_serve.add_mutually_exclusive_group()
-    serve_mode.add_argument("--viz", action="store_true", default=True, help="Serve visualization UI (default)")
-    serve_mode.add_argument("--mcp", action="store_true", help="Run as MCP stdio server")
+    serve_mode.add_argument(
+        "--viz",
+        action="store_true",
+        default=True,
+        help="Serve visualization UI (default)",
+    )
+    serve_mode.add_argument(
+        "--mcp", action="store_true", help="Run as MCP stdio server"
+    )
     p_serve.add_argument("--repo", default=".", help="Repo to analyze (viz mode)")
     p_serve.add_argument("--port", type=int, default=8080, help="Port for viz server")
-    p_serve.add_argument("--watch", action="store_true", help="Watch for file changes (viz mode)")
+    p_serve.add_argument(
+        "--watch", action="store_true", help="Watch for file changes (viz mode)"
+    )
     p_serve.add_argument("--output", help="blastradius.json path override (viz mode)")
 
     # ── symbols ────────────────────────────────────────────────────────────────
-    p_sym = sub.add_parser("symbols", help="Build a symbol index (functions, classes, exports)")
-    p_sym.add_argument("repo", nargs="?", default=".", help="Path to repo root (default: .)")
-    p_sym.add_argument(
-        "--output", help="Output path for symbolindex.json (default: <repo>/symbolindex.json)"
+    p_sym = sub.add_parser(
+        "symbols", help="Build a symbol index (functions, classes, exports)"
     )
     p_sym.add_argument(
-        "--inline", action="store_true",
+        "repo", nargs="?", default=".", help="Path to repo root (default: .)"
+    )
+    p_sym.add_argument(
+        "--output",
+        help="Output path for symbolindex.json (default: <repo>/symbolindex.json)",
+    )
+    p_sym.add_argument(
+        "--inline",
+        action="store_true",
         help="Embed symbols into blastradius.json nodes instead of a separate file",
     )
     p_sym.add_argument(
@@ -740,34 +893,51 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to blastradius.json for --inline mode (auto-discovered if omitted)",
     )
     p_sym.add_argument(
-        "--claude-md", dest="claude_md", action="store_true",
+        "--claude-md",
+        dest="claude_md",
+        action="store_true",
         help="Write compressed symbol summary to CLAUDE.md (exported symbols only by default)",
     )
     p_sym.add_argument(
-        "--claude-md-path", dest="claude_md_path",
+        "--claude-md-path",
+        dest="claude_md_path",
         help="Path to CLAUDE.md (default: <repo>/CLAUDE.md)",
     )
     p_sym.add_argument(
-        "--all-symbols", dest="all_symbols", action="store_true",
+        "--all-symbols",
+        dest="all_symbols",
+        action="store_true",
         help="Include non-exported symbols in --claude-md output (default: exported only)",
     )
 
     # ── lookup ─────────────────────────────────────────────────────────────
-    p_lookup = sub.add_parser("lookup", help="Find where a symbol is defined (file + line)")
+    p_lookup = sub.add_parser(
+        "lookup", help="Find where a symbol is defined (file + line)"
+    )
     p_lookup.add_argument("name", help="Symbol name to look up")
-    p_lookup.add_argument("--index", help="Path to symbolindex.json (auto-discovered if omitted)")
+    p_lookup.add_argument(
+        "--index", help="Path to symbolindex.json (auto-discovered if omitted)"
+    )
     p_lookup.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # ── dependencies ───────────────────────────────────────────────────────
-    p_deps = sub.add_parser("dependencies", help="Show imports and imported-by for a file")
+    p_deps = sub.add_parser(
+        "dependencies", help="Show imports and imported-by for a file"
+    )
     p_deps.add_argument("file", help="File path to inspect")
-    p_deps.add_argument("--index", help="Path to blastradius.json (auto-discovered if omitted)")
+    p_deps.add_argument(
+        "--index", help="Path to blastradius.json (auto-discovered if omitted)"
+    )
     p_deps.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # ── high-blast ─────────────────────────────────────────────────────────
     p_hb = sub.add_parser("high-blast", help="List files above a blast score threshold")
-    p_hb.add_argument("--threshold", type=float, default=5.0, help="Minimum blast score (default: 5)")
-    p_hb.add_argument("--index", help="Path to blastradius.json (auto-discovered if omitted)")
+    p_hb.add_argument(
+        "--threshold", type=float, default=5.0, help="Minimum blast score (default: 5)"
+    )
+    p_hb.add_argument(
+        "--index", help="Path to blastradius.json (auto-discovered if omitted)"
+    )
     p_hb.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # ── symbol-blast ──────────────────────────────────────────────────────────
@@ -775,15 +945,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "symbol-blast",
         help="Per-export blast radius: which importers reference each exported symbol",
     )
-    p_sb.add_argument("file", help="Repo-relative path to the file (e.g. lib/db/schema.ts)")
+    p_sb.add_argument(
+        "file", help="Repo-relative path to the file (e.g. lib/db/schema.ts)"
+    )
     p_sb.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # ── db ─────────────────────────────────────────────────────────────────────
     p_db = sub.add_parser("db", help="Manage the SQLite store (.blastradius/index.db)")
     p_db.add_argument("--db", help="Path to index.db (auto-discovered if omitted)")
-    p_db.add_argument("--json", action="store_true", help="Output raw JSON (status only)")
+    p_db.add_argument(
+        "--json", action="store_true", help="Output raw JSON (status only)"
+    )
     db_sub = p_db.add_subparsers(dest="db_command", required=True)
-    db_sub.add_parser("status", help="Show store schema version, last commit, and counts")
+    db_sub.add_parser(
+        "status", help="Show store schema version, last commit, and counts"
+    )
     db_sub.add_parser("migrate", help="Apply pending schema migrations")
 
     # ── history ────────────────────────────────────────────────────────────────
@@ -792,10 +968,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Backfill temporal graph data from git history (no working-tree checkouts)",
     )
     p_hist.add_argument("repo", nargs="?", default=".", help="Repo root (default: .)")
-    p_hist.add_argument("--since", metavar="REF",
-                        help="Only process commits after this date/ref")
     p_hist.add_argument(
-        "--max-commits", dest="max_commits", type=int, default=1000,
+        "--since", metavar="REF", help="Only process commits after this date/ref"
+    )
+    p_hist.add_argument(
+        "--max-commits",
+        dest="max_commits",
+        type=int,
+        default=1000,
         help="Maximum commits to process (default: 1000)",
     )
     p_hist.add_argument("--json", action="store_true", help="Output summary as JSON")
@@ -816,20 +996,35 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Hybrid semantic + keyword + graph symbol search",
     )
     p_search.add_argument("query", help="Natural-language or keyword query")
-    p_search.add_argument("--k", type=int, default=10, help="Number of results (default: 10)")
     p_search.add_argument(
-        "--as-of", dest="as_of", metavar="REF",
+        "--k", type=int, default=10, help="Number of results (default: 10)"
+    )
+    p_search.add_argument(
+        "--as-of",
+        dest="as_of",
+        metavar="REF",
         help="Restrict results to symbols visible at this commit/ref",
     )
     p_search.add_argument("--db", help="Path to index.db (auto-discovered if omitted)")
     p_search.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # ── install-hook ───────────────────────────────────────────────────────
-    p_hook = sub.add_parser("install-hook", help="Install a pre-commit hook for impact warnings")
+    p_hook = sub.add_parser(
+        "install-hook", help="Install a pre-commit hook for impact warnings"
+    )
     p_hook.add_argument("--repo", default=".", help="Repo root (default: .)")
-    p_hook.add_argument("--threshold", type=int, default=10, help="Blast score warning threshold (default: 10)")
-    p_hook.add_argument("--strict", action="store_true", help="Block commit when threshold exceeded")
-    p_hook.add_argument("--remove", action="store_true", help="Remove the installed hook")
+    p_hook.add_argument(
+        "--threshold",
+        type=int,
+        default=10,
+        help="Blast score warning threshold (default: 10)",
+    )
+    p_hook.add_argument(
+        "--strict", action="store_true", help="Block commit when threshold exceeded"
+    )
+    p_hook.add_argument(
+        "--remove", action="store_true", help="Remove the installed hook"
+    )
 
     return parser
 
@@ -844,19 +1039,19 @@ def main() -> None:
     args = parser.parse_args()
 
     dispatch = {
-        "analyze":      _cmd_analyze,
-        "impact":       _cmd_impact,
-        "serve":        _cmd_serve,
-        "symbols":      _cmd_symbols,
-        "lookup":       _cmd_lookup,
+        "analyze": _cmd_analyze,
+        "impact": _cmd_impact,
+        "serve": _cmd_serve,
+        "symbols": _cmd_symbols,
+        "lookup": _cmd_lookup,
         "dependencies": _cmd_dependencies,
-        "high-blast":   _cmd_high_blast,
-        "symbol-blast":  _cmd_symbol_blast,
-        "install-hook":  _cmd_install_hook,
-        "db":            _cmd_db,
-        "history":       _cmd_history,
+        "high-blast": _cmd_high_blast,
+        "symbol-blast": _cmd_symbol_blast,
+        "install-hook": _cmd_install_hook,
+        "db": _cmd_db,
+        "history": _cmd_history,
         "changed-since": _cmd_changed_since,
-        "search":        _cmd_search,
+        "search": _cmd_search,
     }
     dispatch[args.command](args)
 

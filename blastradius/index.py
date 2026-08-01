@@ -6,6 +6,7 @@ Phase-1 change: build() now also syncs graph data to a SQLite store at
 <repo>/.blastradius/index.db.  The JSON write path is unchanged so existing
 consumers keep working without modification.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -31,7 +32,10 @@ def _git_head(root: Path) -> str | None:
     try:
         r = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=root, capture_output=True, text=True, timeout=10,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:
@@ -43,7 +47,10 @@ def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
     try:
         r = subprocess.run(
             ["git", "diff", "--name-status", from_commit, to_commit],
-            cwd=root, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         paths = set()
         for line in r.stdout.splitlines():
@@ -60,7 +67,10 @@ def git_modified(root: Path, from_ref: str, to_ref: str = "HEAD") -> list[str]:
     try:
         r = subprocess.run(
             ["git", "diff", "--name-status", from_ref, to_ref],
-            cwd=root, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         modified = []
         for line in r.stdout.splitlines():
@@ -77,7 +87,10 @@ def git_reachable(root: Path, ref: str) -> set:
     try:
         r = subprocess.run(
             ["git", "log", "--format=%H", ref],
-            cwd=root, capture_output=True, text=True, timeout=60,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if r.returncode != 0:
             return set()
@@ -91,7 +104,10 @@ def git_resolve(root: Path, ref: str) -> str | None:
     try:
         r = subprocess.run(
             ["git", "rev-parse", ref],
-            cwd=root, capture_output=True, text=True, timeout=10,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:
@@ -113,6 +129,7 @@ def _embed_new_symbols(store) -> None:
     Silently skips if any required env var is missing or if the call fails.
     """
     import os
+
     endpoint = os.environ.get("BLASTRADIUS_EMBEDDING_ENDPOINT", "")
     model = os.environ.get("BLASTRADIUS_EMBEDDING_MODEL", "")
     dims_str = os.environ.get("BLASTRADIUS_EMBEDDING_DIMS", "")
@@ -132,6 +149,7 @@ def _embed_new_symbols(store) -> None:
 
     try:
         from blastradius.semantic.provider import OpenAIEmbeddingProvider
+
         provider = OpenAIEmbeddingProvider(endpoint=endpoint, model=model, dims=dims)
         ids = [p[0] for p in pairs]
         texts = [p[1] for p in pairs]
@@ -185,6 +203,7 @@ def build(repo_path: str, output: Path | None = None) -> dict:
     # Build and sync symbol index
     try:
         from blastradius.symbols import build_symbol_index
+
         symbol_data = build_symbol_index(str(root))
         store.sync_symbols(symbol_data, commit=head_commit)
     except Exception as exc:

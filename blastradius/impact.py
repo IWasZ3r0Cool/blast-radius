@@ -1,4 +1,5 @@
 """Blast-radius computation: direct + transitive dependents + numeric score."""
+
 from __future__ import annotations
 
 from collections import defaultdict, deque
@@ -58,12 +59,12 @@ def compute_blast_radius(nodes: list[dict], links: list[dict]) -> dict[str, dict
         t = len(transitive_ids)
 
         results[nid] = {
-            "direct_dependents":    d,
+            "direct_dependents": d,
             "transitive_dependents": t,
-            "blast_score":          round(d + 0.5 * t, 2),
-            "direct_ids":           direct_ids,
-            "transitive_ids":       transitive_ids,
-            "dep_paths":            dep_paths,
+            "blast_score": round(d + 0.5 * t, 2),
+            "direct_ids": direct_ids,
+            "transitive_ids": transitive_ids,
+            "dep_paths": dep_paths,
         }
 
     return results
@@ -73,15 +74,15 @@ def enrich_nodes(nodes: list[dict], blast: dict[str, dict]) -> list[dict]:
     """Attach blast-radius fields to each node in-place."""
     for node in nodes:
         b = blast.get(node["id"], {})
-        node["direct_dependents"]    = b.get("direct_dependents", 0)
+        node["direct_dependents"] = b.get("direct_dependents", 0)
         node["transitive_dependents"] = b.get("transitive_dependents", 0)
-        node["blast_score"]          = b.get("blast_score", 0.0)
+        node["blast_score"] = b.get("blast_score", 0.0)
     return nodes
 
 
 def enrich_links(nodes: list[dict], links: list[dict]) -> list[dict]:
     """Add imports / imported_by lists to each node."""
-    imports_map:     dict[str, list[str]] = defaultdict(list)
+    imports_map: dict[str, list[str]] = defaultdict(list)
     imported_by_map: dict[str, list[str]] = defaultdict(list)
     node_ids = {n["id"] for n in nodes}
 
@@ -94,7 +95,7 @@ def enrich_links(nodes: list[dict], links: list[dict]) -> list[dict]:
 
     for node in nodes:
         nid = node["id"]
-        node["imports"]     = imports_map.get(nid, [])
+        node["imports"] = imports_map.get(nid, [])
         node["imported_by"] = imported_by_map.get(nid, [])
 
     return nodes

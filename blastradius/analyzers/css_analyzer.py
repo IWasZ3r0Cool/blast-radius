@@ -1,4 +1,5 @@
 """CSS / SCSS / Less stylesheet analyzer."""
+
 import re
 from pathlib import Path
 
@@ -42,7 +43,11 @@ def extract_imports(source: str):
         for m in pattern.finditer(source):
             mod = m.group(1)
             # Skip external URLs and data URIs
-            if mod.startswith("http") or mod.startswith("//") or mod.startswith("data:"):
+            if (
+                mod.startswith("http")
+                or mod.startswith("//")
+                or mod.startswith("data:")
+            ):
                 continue
             if mod not in seen:
                 seen.add(mod)
@@ -114,15 +119,17 @@ def analyze(root: Path, group_map: dict):
         mods = extract_imports(source)
         lang = detect_language(f)
 
-        nodes.append({
-            "id": rel,
-            "type": "style",
-            "language": lang,
-            "size": loc,
-            "loc": loc,
-            "group": dir_group(f, root, group_map),
-            "imports": len(mods),
-        })
+        nodes.append(
+            {
+                "id": rel,
+                "type": "style",
+                "language": lang,
+                "size": loc,
+                "loc": loc,
+                "group": dir_group(f, root, group_map),
+                "imports": len(mods),
+            }
+        )
 
         for mod in mods:
             internal = resolve_internal(mod, f, root, all_rel)
@@ -131,7 +138,12 @@ def analyze(root: Path, group_map: dict):
                 links_map[key] = links_map.get(key, 0) + 1
             # CSS external imports (CDN fonts etc.) are not tracked as nodes
 
-    return nodes, [], links_map, {
-        "total_files": len(css_files),
-        "total_loc": total_loc,
-    }
+    return (
+        nodes,
+        [],
+        links_map,
+        {
+            "total_files": len(css_files),
+            "total_loc": total_loc,
+        },
+    )

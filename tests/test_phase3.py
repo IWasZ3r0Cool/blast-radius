@@ -8,6 +8,7 @@ Acceptance criteria (from CKG-DESIGN-001):
   3. With sqlite-vec absent, search degrades to FTS + graph (no crash).
   4. With endpoint unreachable, search degrades gracefully (no crash).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,6 +22,7 @@ import pytest
 FIXTURE_SRC = Path(__file__).parent / "fixtures" / "simple_python"
 
 # ── stub embedding provider ───────────────────────────────────────────────────
+
 
 class StubProvider:
     """Deterministic embedding provider for tests — no network calls."""
@@ -45,6 +47,7 @@ class StubProvider:
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _git(repo: Path, *args: str) -> str:
     r = subprocess.run(
         ["git", *args], cwd=repo, capture_output=True, text=True, check=True
@@ -66,6 +69,7 @@ def _commit_all(repo: Path, message: str) -> str:
 
 def _run_analyze(repo: Path) -> None:
     import blastradius.index as idx_mod
+
     importlib.reload(idx_mod)
     idx_mod.build(str(repo))
 
@@ -83,12 +87,14 @@ def _make_repo_with_symbols(tmp_path: Path) -> Path:
 
 try:
     import sqlite_vec as _sv
+
     HAS_SQLITE_VEC = True
 except ImportError:
     HAS_SQLITE_VEC = False
 
 
 # ── Test 1: FTS search returns relevant results ───────────────────────────────
+
 
 def test_fts_search_returns_results(tmp_path: Path) -> None:
     """fts_search finds symbols by name keyword without any embedding."""
@@ -100,7 +106,8 @@ def test_fts_search_returns_results(tmp_path: Path) -> None:
 
     # simple_python has symbols; search for something that should match
     active_names = [
-        r[0] for r in store._conn.execute(
+        r[0]
+        for r in store._conn.execute(
             "SELECT name FROM symbols WHERE active=1 LIMIT 20"
         ).fetchall()
     ]
@@ -113,13 +120,16 @@ def test_fts_search_returns_results(tmp_path: Path) -> None:
 
     assert results, f"fts_search returned nothing for '{target}'"
     assert results[0] in [
-        r[0] for r in __import__("sqlite3").connect(
-            str(db_path_for(repo))
-        ).execute("SELECT id FROM symbols WHERE name=? AND active=1", (target,)).fetchall()
+        r[0]
+        for r in __import__("sqlite3")
+        .connect(str(db_path_for(repo)))
+        .execute("SELECT id FROM symbols WHERE name=? AND active=1", (target,))
+        .fetchall()
     ], f"Top FTS result is not the expected symbol for '{target}'"
 
 
 # ── Test 2: hybrid_search with stub provider returns results ──────────────────
+
 
 def test_hybrid_search_stub_provider(tmp_path: Path) -> None:
     """hybrid_search returns results using stub embeddings + FTS, no live endpoint."""
@@ -167,6 +177,7 @@ def test_hybrid_search_stub_provider(tmp_path: Path) -> None:
 
 # ── Test 3: degradation — no sqlite-vec installed ─────────────────────────────
 
+
 def test_search_degrades_without_sqlite_vec(tmp_path: Path, capsys) -> None:
     """hybrid_search falls back to FTS+graph and emits notice when vec unavailable."""
     from blastradius.index import db_path_for
@@ -190,13 +201,16 @@ def test_search_degrades_without_sqlite_vec(tmp_path: Path, capsys) -> None:
     results = hybrid_search(store=store, query=query, k=5, provider=stub)
     store.close()
 
-    assert isinstance(results, list), "hybrid_search must return a list even without vec"
+    assert isinstance(results, list), (
+        "hybrid_search must return a list even without vec"
+    )
     # The degradation notice should have been printed to stderr
     captured = capsys.readouterr()
     assert "sqlite-vec" in captured.err or len(results) >= 0  # notice OR graceful empty
 
 
 # ── Test 4: degradation — endpoint unreachable ────────────────────────────────
+
 
 def test_search_degrades_endpoint_unreachable(tmp_path: Path) -> None:
     """hybrid_search falls back to FTS+graph when embedding endpoint errors."""
@@ -231,6 +245,7 @@ def test_search_degrades_endpoint_unreachable(tmp_path: Path) -> None:
 
 # ── Test 5: graph_expand returns related symbols ──────────────────────────────
 
+
 def test_graph_expand(tmp_path: Path) -> None:
     """graph_expand returns symbols from files that import or are imported by given symbols."""
     from blastradius.index import db_path_for
@@ -239,9 +254,12 @@ def test_graph_expand(tmp_path: Path) -> None:
     repo = _make_repo_with_symbols(tmp_path)
     store = Store(db_path_for(repo))
 
-    seed_ids = [r[0] for r in store._conn.execute(
-        "SELECT id FROM symbols WHERE active=1 LIMIT 2"
-    ).fetchall()]
+    seed_ids = [
+        r[0]
+        for r in store._conn.execute(
+            "SELECT id FROM symbols WHERE active=1 LIMIT 2"
+        ).fetchall()
+    ]
 
     if not seed_ids:
         store.close()
@@ -257,6 +275,7 @@ def test_graph_expand(tmp_path: Path) -> None:
 
 
 # ── Test 6: get_symbol returns correct metadata ───────────────────────────────
+
 
 def test_get_symbol_metadata(tmp_path: Path) -> None:
     """get_symbol returns name, file, kind, and other expected fields."""
@@ -283,6 +302,7 @@ def test_get_symbol_metadata(tmp_path: Path) -> None:
 
 # ── Test 7: schema_version migrated to "2" ───────────────────────────────────
 
+
 def test_schema_version_is_current(tmp_path: Path) -> None:
     """Opening a fresh store sets schema_version to the current version."""
     from blastradius.store import SCHEMA_VERSION, Store
@@ -292,4 +312,6 @@ def test_schema_version_is_current(tmp_path: Path) -> None:
     version = store.get_meta("schema_version")
     store.close()
 
-    assert version == SCHEMA_VERSION, f"Expected schema_version '{SCHEMA_VERSION}', got '{version}'"
+    assert version == SCHEMA_VERSION, (
+        f"Expected schema_version '{SCHEMA_VERSION}', got '{version}'"
+    )

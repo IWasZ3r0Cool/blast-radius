@@ -8,6 +8,7 @@ Node types:
 Links:
   local module sources, cross-resource references, provider imports.
 """
+
 import re
 from pathlib import Path
 from typing import Optional
@@ -16,51 +17,58 @@ from .base import dir_group, is_ignored, is_skip_dir, load_gitignore_patterns
 
 # ── Regexes ────────────────────────────────────────────────────────────────────
 _RESOURCE_RE = re.compile(r'^resource\s+"([^"]+)"\s+"([^"]+)"', re.MULTILINE)
-_DATA_RE     = re.compile(r'^data\s+"([^"]+)"\s+"([^"]+)"',     re.MULTILINE)
-_MODULE_RE   = re.compile(r'^module\s+"([^"]+)"',               re.MULTILINE)
-_PROVIDER_RE = re.compile(r'^provider\s+"([^"]+)"',             re.MULTILINE)
+_DATA_RE = re.compile(r'^data\s+"([^"]+)"\s+"([^"]+)"', re.MULTILINE)
+_MODULE_RE = re.compile(r'^module\s+"([^"]+)"', re.MULTILINE)
+_PROVIDER_RE = re.compile(r'^provider\s+"([^"]+)"', re.MULTILINE)
 _SOURCE_ATTR_RE = re.compile(r'\bsource\s*=\s*"([^"]+)"')
 
 # required_providers { provider = { ... } } — one level of nesting
 _REQ_PROVIDERS_RE = re.compile(
-    r'required_providers\s*\{((?:[^{}]|\{[^{}]*\})*)\}',
+    r"required_providers\s*\{((?:[^{}]|\{[^{}]*\})*)\}",
     re.DOTALL,
 )
 # Match provider entries (name = { ... }) but not scalar attrs (name = "...")
-_PROV_ENTRY_RE = re.compile(r'^\s+(\w+)\s*=\s*\{', re.MULTILINE)
+_PROV_ENTRY_RE = re.compile(r"^\s+(\w+)\s*=\s*\{", re.MULTILINE)
 
 # Generic resource reference scan: aws_s3_bucket.my_bucket
 # Requires at least one underscore AND explicitly excludes var./local./data./module. prefixes
-_RES_REF_RE  = re.compile(
-    r'\b(?!(?:var|local|data|module)\.)([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\.([a-zA-Z0-9_]+)\b'
+_RES_REF_RE = re.compile(
+    r"\b(?!(?:var|local|data|module)\.)([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\.([a-zA-Z0-9_]+)\b"
 )
 # Data reference: data.type.name
-_DATA_REF_RE = re.compile(r'\bdata\.([a-z][a-z0-9_]*)\.([a-zA-Z0-9_]+)\b')
+_DATA_REF_RE = re.compile(r"\bdata\.([a-z][a-z0-9_]*)\.([a-zA-Z0-9_]+)\b")
 # Variable definition and reference: variable "name" / var.name
-_VAR_DEF_RE  = re.compile(r'^variable\s+"([^"]+)"', re.MULTILINE)
-_VAR_REF_RE  = re.compile(r'\bvar\.([a-zA-Z0-9_]+)\b')
+_VAR_DEF_RE = re.compile(r'^variable\s+"([^"]+)"', re.MULTILINE)
+_VAR_REF_RE = re.compile(r"\bvar\.([a-zA-Z0-9_]+)\b")
 # Locals block header — full block extracted via _find_block to handle any nesting depth
-_LOCALS_HEADER_RE = re.compile(r'^locals\b', re.MULTILINE)
-_LOCAL_KEY_RE     = re.compile(r'^\s+(\w+)\s*=', re.MULTILINE)
-_LOCAL_NESTED_RE  = re.compile(r'\{[^{}]*\}')  # innermost block — applied iteratively
-_LOCAL_REF_RE    = re.compile(r'\blocal\.([a-zA-Z0-9_]+)\b')
+_LOCALS_HEADER_RE = re.compile(r"^locals\b", re.MULTILINE)
+_LOCAL_KEY_RE = re.compile(r"^\s+(\w+)\s*=", re.MULTILINE)
+_LOCAL_NESTED_RE = re.compile(r"\{[^{}]*\}")  # innermost block — applied iteratively
+_LOCAL_REF_RE = re.compile(r"\blocal\.([a-zA-Z0-9_]+)\b")
 # Output definition
 _OUTPUT_DEF_RE = re.compile(r'^output\s+"([^"]+)"', re.MULTILINE)
 # Module output reference: module.name.attr — 3-part cross-dir lookup
-_MOD_OUTPUT_REF_RE = re.compile(r'\bmodule\.([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\b')
+_MOD_OUTPUT_REF_RE = re.compile(r"\bmodule\.([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\b")
 # Module block reference (2-part): links to file declaring module "name" in same dir
 # Negative lookahead excludes 3-part module.X.attr references (handled by _MOD_OUTPUT_REF_RE)
-_MOD_REF_RE  = re.compile(r'\bmodule\.([a-zA-Z0-9_]+)\b(?!\.[a-zA-Z0-9_])')
+_MOD_REF_RE = re.compile(r"\bmodule\.([a-zA-Z0-9_]+)\b(?!\.[a-zA-Z0-9_])")
 
 _CONFIG_STEMS = {
-    "variables", "vars", "versions", "providers",
-    "terraform", "backend", "locals", "settings",
-    "outputs", "output",
+    "variables",
+    "vars",
+    "versions",
+    "providers",
+    "terraform",
+    "backend",
+    "locals",
+    "settings",
+    "outputs",
+    "output",
 }
 _MODULE_DIRS = {"modules", "module"}
 
 # Strip common cloud/vendor prefixes when matching module dir name to a file stem
-_VENDOR_PREFIX_RE = re.compile(r'^(?:gcp|aws|azure|google|terraform)-')
+_VENDOR_PREFIX_RE = re.compile(r"^(?:gcp|aws|azure|google|terraform)-")
 
 
 def collect_files(root: Path, patterns: list) -> list[Path]:
@@ -73,7 +81,7 @@ def collect_files(root: Path, patterns: list) -> list[Path]:
 
 
 def node_type(path: Path, has_resources: bool, has_data: bool) -> str:
-    stem  = path.stem.lower()
+    stem = path.stem.lower()
     parts = [p.lower() for p in path.parts]
     if stem in _CONFIG_STEMS:
         return "config"
@@ -87,7 +95,7 @@ def node_type(path: Path, has_resources: bool, has_data: bool) -> str:
 def _find_block(source: str, start: int) -> str:
     """Return the content between the braces of the {...} block whose opening brace
     is at the first '{' found at position >= start.  Returns '' if no block found."""
-    i = source.find('{', start)
+    i = source.find("{", start)
     if i == -1:
         return ""
     depth = 1
@@ -99,23 +107,23 @@ def _find_block(source: str, start: int) -> str:
             j += 1
             while j < n:
                 ch = source[j]
-                if ch == '\\':
+                if ch == "\\":
                     j += 2
                     continue
                 if ch == '"':
                     break
                 j += 1
-        elif c == '#' or (c == '/' and j + 1 < n and source[j + 1] == '/'):
-            while j < n and source[j] != '\n':
+        elif c == "#" or (c == "/" and j + 1 < n and source[j + 1] == "/"):
+            while j < n and source[j] != "\n":
                 j += 1
-        elif c == '/' and j + 1 < n and source[j + 1] == '*':
+        elif c == "/" and j + 1 < n and source[j + 1] == "*":
             j += 2
-            while j + 1 < n and not (source[j] == '*' and source[j + 1] == '/'):
+            while j + 1 < n and not (source[j] == "*" and source[j + 1] == "/"):
                 j += 1
             j += 2
-        elif c == '{':
+        elif c == "{":
             depth += 1
-        elif c == '}':
+        elif c == "}":
             depth -= 1
         j += 1
     return source[i + 1 : j - 1]
@@ -170,7 +178,7 @@ def analyze(root: Path, group_map: dict):
     if not tf_files:
         return [], [], {}, {"total_files": 0, "total_loc": 0}
 
-    all_rel     = {str(f.relative_to(root)) for f in tf_files}
+    all_rel = {str(f.relative_to(root)) for f in tf_files}
     # Every directory that contains at least one .tf file is a module entry-point
     module_dirs = {str(f.parent.relative_to(root)) for f in tf_files}
 
@@ -200,7 +208,7 @@ def analyze(root: Path, group_map: dict):
                 return c
         return candidates[0]
 
-    nodes     = []
+    nodes = []
     links_map = {}
     ext_nodes = {}
     total_loc = 0
@@ -213,12 +221,12 @@ def analyze(root: Path, group_map: dict):
     per_dir: dict[str, dict] = {}
 
     for _module_dir, dir_files in _group_by_dir(tf_files, root).items():
-        file_data            = {}  # rel → metadata
-        resource_map         = {}  # (type, name) → rel   — scoped to this module dir
-        data_map             = {}  # (type, name) → rel   — scoped to this module dir
-        var_map              = {}  # var_name → rel        — scoped to this module dir
-        local_map            = {}  # local_name → rel      — scoped to this module dir
-        module_instance_map  = {}  # module_instance_name → rel — scoped to this module dir
+        file_data = {}  # rel → metadata
+        resource_map = {}  # (type, name) → rel   — scoped to this module dir
+        data_map = {}  # (type, name) → rel   — scoped to this module dir
+        var_map = {}  # var_name → rel        — scoped to this module dir
+        local_map = {}  # local_name → rel      — scoped to this module dir
+        module_instance_map = {}  # module_instance_name → rel — scoped to this module dir
 
         for f in sorted(dir_files):
             rel = str(f.relative_to(root))
@@ -227,16 +235,18 @@ def analyze(root: Path, group_map: dict):
             except OSError:
                 continue
 
-            resources    = {(m.group(1), m.group(2)) for m in _RESOURCE_RE.finditer(source)}
-            data_srcs    = {(m.group(1), m.group(2)) for m in _DATA_RE.finditer(source)}
-            var_defs     = {m.group(1) for m in _VAR_DEF_RE.finditer(source)}
+            resources = {
+                (m.group(1), m.group(2)) for m in _RESOURCE_RE.finditer(source)
+            }
+            data_srcs = {(m.group(1), m.group(2)) for m in _DATA_RE.finditer(source)}
+            var_defs = {m.group(1) for m in _VAR_DEF_RE.finditer(source)}
             mod_instance = {m.group(1) for m in _MODULE_RE.finditer(source)}
             local_defs: set[str] = set()
             for hm in _LOCALS_HEADER_RE.finditer(source):
                 blk = _find_block(source, hm.end())
                 flat = blk
                 while True:
-                    stripped = _LOCAL_NESTED_RE.sub('{}', flat)
+                    stripped = _LOCAL_NESTED_RE.sub("{}", flat)
                     if stripped == flat:
                         break
                     flat = stripped
@@ -255,12 +265,12 @@ def analyze(root: Path, group_map: dict):
                 module_instance_map[mi] = rel
 
             file_data[rel] = {
-                "source":       source,
-                "resources":    resources,
+                "source": source,
+                "resources": resources,
                 "data_sources": data_srcs,
-                "modules":      _module_sources(source),
-                "providers":    _provider_names(source),
-                "loc":          source.count("\n") + 1,
+                "modules": _module_sources(source),
+                "providers": _provider_names(source),
+                "loc": source.count("\n") + 1,
             }
 
             dir_rel = str(Path(rel).parent)
@@ -276,39 +286,41 @@ def analyze(root: Path, group_map: dict):
                 if mod_src.startswith(("./", "../")):
                     try:
                         target_dir = str(
-                            (f_tmp.parent / mod_src).resolve().relative_to(root.resolve())
+                            (f_tmp.parent / mod_src)
+                            .resolve()
+                            .relative_to(root.resolve())
                         )
                         module_src_resolved_map[mod_name] = target_dir
                     except ValueError:
                         pass
 
         per_dir[_module_dir] = {
-            "file_data":               file_data,
-            "resource_map":            resource_map,
-            "data_map":                data_map,
-            "var_map":                 var_map,
-            "local_map":               local_map,
-            "module_instance_map":     module_instance_map,
+            "file_data": file_data,
+            "resource_map": resource_map,
+            "data_map": data_map,
+            "var_map": var_map,
+            "local_map": local_map,
+            "module_instance_map": module_instance_map,
             "module_src_resolved_map": module_src_resolved_map,
         }
 
     # ── Phase 2 (all dirs): build nodes and edges (global_output_map fully populated) ──
     for d in per_dir.values():
-        file_data               = d["file_data"]
-        resource_map            = d["resource_map"]
-        data_map                = d["data_map"]
-        var_map                 = d["var_map"]
-        local_map               = d["local_map"]
-        module_instance_map     = d["module_instance_map"]
+        file_data = d["file_data"]
+        resource_map = d["resource_map"]
+        data_map = d["data_map"]
+        var_map = d["var_map"]
+        local_map = d["local_map"]
+        module_instance_map = d["module_instance_map"]
         module_src_resolved_map = d["module_src_resolved_map"]
 
         for rel, data in file_data.items():
-            f         = root / rel
-            loc       = data["loc"]
+            f = root / rel
+            loc = data["loc"]
             total_loc += loc
-            source    = data["source"]
+            source = data["source"]
 
-            ntype      = node_type(f, bool(data["resources"]), bool(data["data_sources"]))
+            ntype = node_type(f, bool(data["resources"]), bool(data["data_sources"]))
             seen_links: set[tuple[str, str]] = set()
 
             # Module source → cross-directory edges (the only legitimate cross-dir link)
@@ -327,15 +339,18 @@ def analyze(root: Path, group_map: dict):
                 else:
                     # Registry module (e.g. "terraform-aws-modules/vpc/aws")
                     ext_key = mod_src.split("//")[0].split("?")[0]
-                    ext_nodes.setdefault(ext_key, {
-                        "id":       ext_key,
-                        "type":     "import",
-                        "language": "terraform",
-                        "size":     40,
-                        "loc":      0,
-                        "group":    9000,
-                        "imports":  0,
-                    })
+                    ext_nodes.setdefault(
+                        ext_key,
+                        {
+                            "id": ext_key,
+                            "type": "import",
+                            "language": "terraform",
+                            "size": 40,
+                            "loc": 0,
+                            "group": 9000,
+                            "imports": 0,
+                        },
+                    )
                     _add_link(rel, ext_key, seen_links, links_map)
 
             # Intra-module resource references — LOCAL map only, no cross-dir leakage
@@ -378,28 +393,38 @@ def analyze(root: Path, group_map: dict):
 
             # Provider external nodes
             for prov in data["providers"]:
-                ext_nodes.setdefault(prov, {
-                    "id":       prov,
-                    "type":     "import",
-                    "language": "terraform",
-                    "size":     40,
-                    "loc":      0,
-                    "group":    9000,
-                    "imports":  0,
-                })
+                ext_nodes.setdefault(
+                    prov,
+                    {
+                        "id": prov,
+                        "type": "import",
+                        "language": "terraform",
+                        "size": 40,
+                        "loc": 0,
+                        "group": 9000,
+                        "imports": 0,
+                    },
+                )
                 _add_link(rel, prov, seen_links, links_map)
 
-            nodes.append({
-                "id":       rel,
-                "type":     ntype,
-                "language": "terraform",
-                "size":     loc,
-                "loc":      loc,
-                "group":    dir_group(f, root, group_map),
-                "imports":  len(seen_links),
-            })
+            nodes.append(
+                {
+                    "id": rel,
+                    "type": ntype,
+                    "language": "terraform",
+                    "size": loc,
+                    "loc": loc,
+                    "group": dir_group(f, root, group_map),
+                    "imports": len(seen_links),
+                }
+            )
 
-    return nodes, list(ext_nodes.values()), links_map, {
-        "total_files": len(tf_files),
-        "total_loc":   total_loc,
-    }
+    return (
+        nodes,
+        list(ext_nodes.values()),
+        links_map,
+        {
+            "total_files": len(tf_files),
+            "total_loc": total_loc,
+        },
+    )

@@ -1,6 +1,7 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
 """Stdio MCP server — exposes blastradius tools to Claude and other MCP clients."""
+
 from __future__ import annotations
 
 import json
@@ -277,8 +278,8 @@ def _call_analyze_repo(params: dict) -> dict:
     data = build(repo_path)
     return {
         "success": True,
-        "files":   data["meta"]["total_files"],
-        "loc":     data["meta"]["total_loc"],
+        "files": data["meta"]["total_files"],
+        "loc": data["meta"]["total_loc"],
         "languages": data["meta"].get("languages", []),
     }
 
@@ -310,8 +311,8 @@ def _call_get_dependencies(params: dict) -> dict:
         return {"error": f"Node not found: {file_id}"}
 
     return {
-        "file":        file_id,
-        "imports":     node.get("imports", []),
+        "file": file_id,
+        "imports": node.get("imports", []),
         "imported_by": node.get("imported_by", []),
         "blast_score": node.get("blast_score", 0),
     }
@@ -323,10 +324,10 @@ def _call_get_high_blast_files(params: dict) -> dict:
     _NON_FILE_TYPES = {"import", "service", "pipeline", "database"}
     results = [
         {
-            "file":       n["id"],
+            "file": n["id"],
             "blast_score": n.get("blast_score", 0),
-            "loc":        n.get("loc", 0),
-            "direct":     n.get("direct_dependents", 0),
+            "loc": n.get("loc", 0),
+            "direct": n.get("direct_dependents", 0),
             "transitive": n.get("transitive_dependents", 0),
         }
         for n in data["nodes"]
@@ -370,11 +371,11 @@ def _call_lookup_symbol(params: dict) -> dict:
         store.close()
         matches = [
             {
-                "file":     r["file"],
-                "line":     r["line"],
-                "kind":     r["kind"],
+                "file": r["file"],
+                "line": r["line"],
+                "kind": r["kind"],
                 "exported": r["exported"],
-                "methods":  [],
+                "methods": [],
             }
             for r in rows
         ]
@@ -386,11 +387,11 @@ def _call_lookup_symbol(params: dict) -> dict:
             raw = sym_data.get("symbols", {}).get(name, [])
             matches = [
                 {
-                    "file":     m["file"],
-                    "line":     m["line"],
-                    "kind":     m.get("kind", "?"),
+                    "file": m["file"],
+                    "line": m["line"],
+                    "kind": m.get("kind", "?"),
                     "exported": m.get("exported", True),
-                    "methods":  m.get("methods", []),
+                    "methods": m.get("methods", []),
                 }
                 for m in raw
             ]
@@ -405,21 +406,23 @@ def _call_lookup_symbol(params: dict) -> dict:
 def _call_build_symbol_index(params: dict) -> dict:
     from blastradius.symbols import build_symbol_index as _build
     from blastradius.symbols import write_standalone
+
     repo_path = params["repo_path"]
     symbol_data = _build(repo_path)
     out = Path(repo_path) / SYMBOL_INDEX_FILENAME
     write_standalone(symbol_data, out)
     return {
-        "success":       True,
+        "success": True,
         "total_symbols": symbol_data["meta"]["total_symbols"],
-        "files":         len(symbol_data["file_symbols"]),
-        "output":        str(out),
+        "files": len(symbol_data["file_symbols"]),
+        "output": str(out),
     }
 
 
 def _resolve_db(params: dict):
     """Return an open Store for the db_path in params or auto-discovered from cwd."""
     from blastradius.store import Store
+
     db_path_str = params.get("db_path")
     if db_path_str:
         db_path = Path(db_path_str)
@@ -446,6 +449,7 @@ def _call_semantic_search(params: dict) -> dict:
     if endpoint and model and dims_str:
         try:
             from blastradius.semantic.provider import OpenAIEmbeddingProvider
+
             provider = OpenAIEmbeddingProvider(
                 endpoint=endpoint, model=model, dims=int(dims_str)
             )
@@ -472,9 +476,15 @@ def _call_semantic_search(params: dict) -> dict:
 
     # File-level aggregation: group by file, sorted by symbol hit count
     from collections import Counter
+
     file_counts = Counter(r["file"] for r in results)
     files = [{"file": f, "symbol_hits": c} for f, c in file_counts.most_common()]
-    return {"query": params["query"], "count": len(results), "files": files, "results": results}
+    return {
+        "query": params["query"],
+        "count": len(results),
+        "files": files,
+        "results": results,
+    }
 
 
 def _call_temporal_impact(params: dict) -> dict:
@@ -486,9 +496,7 @@ def _call_temporal_impact(params: dict) -> dict:
     file_arg = params["file"]
 
     # Resolve file path against indexed files
-    all_paths = [
-        r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()
-    ]
+    all_paths = [r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()]
     clean = file_arg.lstrip("./")
     file_id = None
     if file_arg in all_paths:
@@ -519,13 +527,13 @@ def _call_temporal_impact(params: dict) -> dict:
                 )
             }
         return {
-            "file":                  file_id,
-            "as_of":                 as_of,
-            "blast_score":           blast["blast_score"],
-            "direct_dependents":     blast["direct_dependents"],
+            "file": file_id,
+            "as_of": as_of,
+            "blast_score": blast["blast_score"],
+            "direct_dependents": blast["direct_dependents"],
             "transitive_dependents": blast["transitive_dependents"],
-            "direct_ids":            blast["direct_ids"],
-            "transitive_ids":        blast["transitive_ids"],
+            "direct_ids": blast["direct_ids"],
+            "transitive_ids": blast["transitive_ids"],
         }
 
     # Current HEAD: fall back to JSON-based path
@@ -541,13 +549,13 @@ def _call_temporal_impact(params: dict) -> dict:
     total = len([n for n in data["nodes"] if n.get("type") != "import"])
     report = format_markdown(fid2, blast, total)
     return {
-        "file":                  fid2,
-        "blast_score":           blast["blast_score"],
-        "direct_dependents":     blast["direct_dependents"],
+        "file": fid2,
+        "blast_score": blast["blast_score"],
+        "direct_dependents": blast["direct_dependents"],
         "transitive_dependents": blast["transitive_dependents"],
-        "direct_ids":            blast["direct_ids"],
-        "transitive_ids":        blast["transitive_ids"],
-        "report":                report,
+        "direct_ids": blast["direct_ids"],
+        "transitive_ids": blast["transitive_ids"],
+        "report": report,
     }
 
 
@@ -559,9 +567,8 @@ def _call_graph_query(params: dict) -> dict:
 
     # Resolve path against indexed files
     all_paths = [
-        r[0] for r in store._conn.execute(
-            "SELECT path FROM files WHERE active=1"
-        ).fetchall()
+        r[0]
+        for r in store._conn.execute("SELECT path FROM files WHERE active=1").fetchall()
     ]
     clean = file_arg.lstrip("./")
     file_id = None
@@ -607,22 +614,29 @@ def _call_changed_since(params: dict) -> dict:
     modified = git_modified(repo_root, full_hash)
     added_set = set(result.get("added_files", []))
     removed_set = set(result.get("removed_files", []))
-    result["modified_files"] = [f for f in modified if f not in added_set and f not in removed_set]
+    result["modified_files"] = [
+        f for f in modified if f not in added_set and f not in removed_set
+    ]
 
     # Filter edges to those touching the changed file set — whole-graph edge noise otherwise.
     touched = added_set | removed_set | set(result["modified_files"])
     all_ae = result["added_edges"]
     all_re = result["removed_edges"]
-    ae_filtered = [e for e in all_ae if e["source"] in touched or e["target"] in touched]
-    re_filtered = [e for e in all_re if e["source"] in touched or e["target"] in touched]
-    result["added_edges"]   = ae_filtered
+    ae_filtered = [
+        e for e in all_ae if e["source"] in touched or e["target"] in touched
+    ]
+    re_filtered = [
+        e for e in all_re if e["source"] in touched or e["target"] in touched
+    ]
+    result["added_edges"] = ae_filtered
     result["removed_edges"] = re_filtered
     suppressed = (len(all_ae) - len(ae_filtered)) + (len(all_re) - len(re_filtered))
     if suppressed:
         result["suppressed_edge_count"] = suppressed
 
     analyze_origin_count = sum(
-        1 for e in ae_filtered
+        1
+        for e in ae_filtered
         if last_indexed and e.get("first_seen_commit") == last_indexed
     )
     if analyze_origin_count:
@@ -635,16 +649,16 @@ def _call_changed_since(params: dict) -> dict:
 
 
 _HANDLERS = {
-    "analyze_repo":        _call_analyze_repo,
-    "get_impact":          _call_get_impact,
-    "get_dependencies":    _call_get_dependencies,
+    "analyze_repo": _call_analyze_repo,
+    "get_impact": _call_get_impact,
+    "get_dependencies": _call_get_dependencies,
     "get_high_blast_files": _call_get_high_blast_files,
-    "lookup_symbol":       _call_lookup_symbol,
-    "build_symbol_index":  _call_build_symbol_index,
-    "semantic_search":     _call_semantic_search,
-    "temporal_impact":     _call_temporal_impact,
-    "graph_query":         _call_graph_query,
-    "changed_since":       _call_changed_since,
+    "lookup_symbol": _call_lookup_symbol,
+    "build_symbol_index": _call_build_symbol_index,
+    "semantic_search": _call_semantic_search,
+    "temporal_impact": _call_temporal_impact,
+    "graph_query": _call_graph_query,
+    "changed_since": _call_changed_since,
 }
 
 
@@ -654,22 +668,28 @@ def _send(obj: dict) -> None:
 
 
 def _handle(msg: dict) -> dict | None:
-    method  = msg.get("method", "")
-    req_id  = msg.get("id")
-    params  = msg.get("params", {})
+    method = msg.get("method", "")
+    req_id = msg.get("id")
+    params = msg.get("params", {})
 
     def ok(result):
         return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
     def err(code, message):
-        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": code, "message": message},
+        }
 
     if method == "initialize":
-        return ok({
-            "protocolVersion": "2024-11-05",
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "blastradius", "version": "0.1.0"},
-        })
+        return ok(
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "blastradius", "version": "0.1.0"},
+            }
+        )
 
     if method == "notifications/initialized":
         return None  # no response for notifications
@@ -685,14 +705,16 @@ def _handle(msg: dict) -> dict | None:
             return err(-32601, f"Unknown tool: {tool_name}")
         try:
             result = handler(tool_args)
-            return ok({
-                "content": [{"type": "text", "text": json.dumps(result, indent=2)}]
-            })
+            return ok(
+                {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+            )
         except Exception as e:
-            return ok({
-                "content": [{"type": "text", "text": f"Error: {e}"}],
-                "isError": True,
-            })
+            return ok(
+                {
+                    "content": [{"type": "text", "text": f"Error: {e}"}],
+                    "isError": True,
+                }
+            )
 
     if method == "ping":
         return ok({})
@@ -709,8 +731,13 @@ def serve() -> None:
         try:
             msg = json.loads(line)
         except json.JSONDecodeError:
-            _send({"jsonrpc": "2.0", "id": None,
-                   "error": {"code": -32700, "message": "Parse error"}})
+            _send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32700, "message": "Parse error"},
+                }
+            )
             continue
         response = _handle(msg)
         if response is not None:

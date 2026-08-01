@@ -1,4 +1,5 @@
 """Rust repository analyzer."""
+
 import re
 import sys
 from pathlib import Path
@@ -20,21 +21,27 @@ from .base import dir_group, is_ignored, is_skip_dir, load_gitignore_patterns
 # ── Regexes ───────────────────────────────────────────────────────────────────
 # use crate::module / use super::module / use self::module
 _USE_INTERNAL_RE = re.compile(
-    r'^use\s+((?:crate|super|self)(?:::\w+)+)',
+    r"^use\s+((?:crate|super|self)(?:::\w+)+)",
     re.MULTILINE,
 )
 # use some_external_crate::...
-_USE_EXTERNAL_RE = re.compile(r'^use\s+(\w+)::', re.MULTILINE)
+_USE_EXTERNAL_RE = re.compile(r"^use\s+(\w+)::", re.MULTILINE)
 # mod foo;  (declares a submodule — creates an edge to foo.rs / foo/mod.rs)
-_MOD_DECL_RE = re.compile(r'^(?:pub\s+)?mod\s+(\w+)\s*;', re.MULTILINE)
+_MOD_DECL_RE = re.compile(r"^(?:pub\s+)?mod\s+(\w+)\s*;", re.MULTILINE)
 
-_ROUTE_DIRS  = {"routes", "handlers", "controllers", "endpoints", "api"}
-_STORE_DIRS  = {"models", "db", "database", "storage", "repository", "repos", "store"}
+_ROUTE_DIRS = {"routes", "handlers", "controllers", "endpoints", "api"}
+_STORE_DIRS = {"models", "db", "database", "storage", "repository", "repos", "store"}
 _CONFIG_NAMES = {"config", "settings", "configuration", "constants", "env"}
 
 STDLIB_CRATES = {
-    "std", "core", "alloc", "proc_macro", "test",
-    "crate", "super", "self",
+    "std",
+    "core",
+    "alloc",
+    "proc_macro",
+    "test",
+    "crate",
+    "super",
+    "self",
 }
 
 
@@ -65,7 +72,7 @@ def parse_cargo_deps(root: Path):
 
 def node_type(path: Path) -> str:
     parts = [p.lower() for p in path.parts]
-    stem  = path.stem.lower()
+    stem = path.stem.lower()
     if stem in _CONFIG_NAMES or any(p in _CONFIG_NAMES for p in parts):
         return "config"
     if any(p in _ROUTE_DIRS for p in parts):
@@ -80,7 +87,7 @@ def node_type(path: Path) -> str:
 def resolve_mod_decl(mod_name: str, file_path: Path, root: Path, all_files: set):
     """Resolve  mod foo;  to foo.rs or foo/mod.rs."""
     parent_rel = str(file_path.parent.relative_to(root))
-    prefix     = parent_rel + "/" if parent_rel != "." else ""
+    prefix = parent_rel + "/" if parent_rel != "." else ""
     for candidate in (f"{prefix}{mod_name}.rs", f"{prefix}{mod_name}/mod.rs"):
         if candidate in all_files:
             return candidate
@@ -110,11 +117,11 @@ def analyze(root: Path, group_map: dict):
         return [], [], {}, {"total_files": 0, "total_loc": 0}
 
     _cargo_deps = parse_cargo_deps(root)
-    all_rel     = {str(f.relative_to(root)) for f in rs_files}
-    nodes       = []
-    links_map   = {}
-    ext_crates  = {}
-    total_loc   = 0
+    all_rel = {str(f.relative_to(root)) for f in rs_files}
+    nodes = []
+    links_map = {}
+    ext_crates = {}
+    total_loc = 0
 
     for f in rs_files:
         rel = str(f.relative_to(root))
@@ -155,15 +162,17 @@ def analyze(root: Path, group_map: dict):
                 seen.add(item)
                 deduped.append(item)
 
-        nodes.append({
-            "id":       rel,
-            "type":     node_type(f),
-            "language": "rust",
-            "size":     loc,
-            "loc":      loc,
-            "group":    dir_group(f, root, group_map),
-            "imports":  len(deduped),
-        })
+        nodes.append(
+            {
+                "id": rel,
+                "type": node_type(f),
+                "language": "rust",
+                "size": loc,
+                "loc": loc,
+                "group": dir_group(f, root, group_map),
+                "imports": len(deduped),
+            }
+        )
 
         for kind, target in deduped:
             if kind == "internal":
@@ -172,18 +181,23 @@ def analyze(root: Path, group_map: dict):
             else:
                 if target not in ext_crates:
                     ext_crates[target] = {
-                        "id":       target,
-                        "type":     "import",
+                        "id": target,
+                        "type": "import",
                         "language": "rust",
-                        "size":     40,
-                        "loc":      0,
-                        "group":    9000,
-                        "imports":  0,
+                        "size": 40,
+                        "loc": 0,
+                        "group": 9000,
+                        "imports": 0,
                     }
                 key = (rel, target)
                 links_map[key] = links_map.get(key, 0) + 1
 
-    return nodes, list(ext_crates.values()), links_map, {
-        "total_files": len(rs_files),
-        "total_loc":   total_loc,
-    }
+    return (
+        nodes,
+        list(ext_crates.values()),
+        links_map,
+        {
+            "total_files": len(rs_files),
+            "total_loc": total_loc,
+        },
+    )

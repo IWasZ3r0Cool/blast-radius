@@ -1,4 +1,5 @@
 """Format blast-radius impact reports for stdout and markdown."""
+
 from __future__ import annotations
 
 
@@ -20,9 +21,9 @@ def format_stdout(
     blast: dict,
     total_nodes: int,
 ) -> str:
-    d   = blast["direct_dependents"]
-    t   = blast["transitive_dependents"]
-    sc  = blast["blast_score"]
+    d = blast["direct_dependents"]
+    t = blast["transitive_dependents"]
+    sc = blast["blast_score"]
     risk = _risk_label(sc, total_nodes)
 
     lines = [
@@ -49,7 +50,9 @@ def format_stdout(
     if total_nodes:
         affected = d + t
         pct = round((affected / total_nodes) * 100, 1)
-        lines.append(f"Risk: {risk} — affects {affected}/{total_nodes} files ({pct}% of codebase)")
+        lines.append(
+            f"Risk: {risk} — affects {affected}/{total_nodes} files ({pct}% of codebase)"
+        )
 
     return "\n".join(lines)
 
@@ -59,9 +62,9 @@ def format_markdown(
     blast: dict,
     total_nodes: int,
 ) -> str:
-    d    = blast["direct_dependents"]
-    t    = blast["transitive_dependents"]
-    sc   = blast["blast_score"]
+    d = blast["direct_dependents"]
+    t = blast["transitive_dependents"]
+    sc = blast["blast_score"]
     risk = _risk_label(sc, total_nodes)
 
     lines = [

@@ -9,6 +9,7 @@ Acceptance criteria (from CKG-DESIGN-001):
      set (incremental detection test).
   3. `blastradius db status` reports correct counts.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,16 +25,25 @@ FIXTURE_SRC = Path(__file__).parent / "fixtures" / "simple_python"
 
 def _init_git(repo: Path) -> str:
     """Initialise a git repo and commit all files; return HEAD hash."""
-    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True,
-                   capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=repo,
-                   check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo,
-                   check=True, capture_output=True)
-    subprocess.run(["git", "add", "."], cwd=repo, check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True
+    )
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
     ).stdout.strip()
@@ -45,6 +55,7 @@ def _run_analyze(repo: Path) -> dict:
     import importlib
 
     import blastradius.index as idx_mod
+
     importlib.reload(idx_mod)
 
     data = idx_mod.build(str(repo))
@@ -69,6 +80,7 @@ def _normalize(data: dict) -> dict:
 
 # ── Test 1: golden / idempotency ─────────────────────────────────────────────
 
+
 def test_golden_idempotent(tmp_path: Path) -> None:
     """Two consecutive analyze() runs on the same repo produce identical JSON."""
     repo = tmp_path / "repo"
@@ -84,6 +96,7 @@ def test_golden_idempotent(tmp_path: Path) -> None:
 
 
 # ── Test 2: DB populated after analyze ───────────────────────────────────────
+
 
 def test_db_populated(tmp_path: Path) -> None:
     """After analyze(), the SQLite store contains the expected file rows."""
@@ -105,14 +118,14 @@ def test_db_populated(tmp_path: Path) -> None:
 
     expected_files = len([n for n in data["nodes"]])
     assert status["active_files"] == expected_files, (
-        f"DB has {status['active_files']} active files; "
-        f"expected {expected_files}"
+        f"DB has {status['active_files']} active files; expected {expected_files}"
     )
     assert status["active_edges"] >= 0
     assert status["schema_version"] == "3"
 
 
 # ── Test 3: incremental detection logs changed file ──────────────────────────
+
 
 def test_incremental_detection(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     """After editing a file and committing, the second analyze reports changed files."""
@@ -128,10 +141,15 @@ def test_incremental_detection(tmp_path: Path, capsys: pytest.CaptureFixture) ->
     target = repo / "utils.py"
     original = target.read_text()
     target.write_text(original + "\n\n# modified\n")
-    subprocess.run(["git", "add", "utils.py"], cwd=repo, check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "modify utils"], cwd=repo,
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "add", "utils.py"], cwd=repo, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "modify utils"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
 
     # Second incremental index
     _run_analyze(repo)
@@ -144,6 +162,7 @@ def test_incremental_detection(tmp_path: Path, capsys: pytest.CaptureFixture) ->
 
 
 # ── Test 4: db status counts ─────────────────────────────────────────────────
+
 
 def test_db_status_counts(tmp_path: Path) -> None:
     """store.status() counts match the number of nodes analyze() produced."""
@@ -170,6 +189,7 @@ def test_db_status_counts(tmp_path: Path) -> None:
 
 # ── Test 5: soft-delete on file removal ──────────────────────────────────────
 
+
 def test_soft_delete_on_removal(tmp_path: Path) -> None:
     """Removing a file marks its DB row inactive, not deleted."""
     from blastradius.index import db_path_for
@@ -183,10 +203,15 @@ def test_soft_delete_on_removal(tmp_path: Path) -> None:
 
     # Remove models.py and commit
     (repo / "models.py").unlink()
-    subprocess.run(["git", "rm", "models.py"], cwd=repo, check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "remove models"], cwd=repo,
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "rm", "models.py"], cwd=repo, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "remove models"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
 
     _run_analyze(repo)
 

@@ -1,4 +1,5 @@
 """Entry point."""
+
 from models import Product, User
 from utils import greet, slugify
 

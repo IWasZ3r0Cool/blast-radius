@@ -4,6 +4,7 @@ Produces service-level nodes from docker-compose files and Dockerfiles.
 Node type: "service"
 Links: depends_on relationships between services.
 """
+
 import re
 from pathlib import Path
 
@@ -11,28 +12,37 @@ from .base import is_ignored, is_skip_dir, load_gitignore_patterns
 
 try:
     import yaml as _yaml
+
     _HAS_YAML = True
 except ImportError:
     _HAS_YAML = False
 
 # ── Compose file names ────────────────────────────────────────────────────────
 COMPOSE_NAMES = {
-    "docker-compose.yml", "docker-compose.yaml",
-    "compose.yml", "compose.yaml",
-    "docker-compose.override.yml", "docker-compose.override.yaml",
-    "docker-compose.prod.yml", "docker-compose.prod.yaml",
-    "docker-compose.dev.yml", "docker-compose.dev.yaml",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "compose.yml",
+    "compose.yaml",
+    "docker-compose.override.yml",
+    "docker-compose.override.yaml",
+    "docker-compose.prod.yml",
+    "docker-compose.prod.yaml",
+    "docker-compose.dev.yml",
+    "docker-compose.dev.yaml",
 }
 
 # Regex fallback for service detection (YAML not available)
-_SVC_NAME_RE  = re.compile(r'^  (\w[\w.-]*):\s*$', re.MULTILINE)
-_DEPENDS_RE   = re.compile(
-    r'depends_on:\s*\n((?:\s*[-\s]*\w[\w.-]*\s*\n)+)', re.MULTILINE
+_SVC_NAME_RE = re.compile(r"^  (\w[\w.-]*):\s*$", re.MULTILINE)
+_DEPENDS_RE = re.compile(
+    r"depends_on:\s*\n((?:\s*[-\s]*\w[\w.-]*\s*\n)+)", re.MULTILINE
 )
-_DEP_ITEM_RE  = re.compile(r'[-\s]+(\w[\w.-]+)')
+_DEP_ITEM_RE = re.compile(r"[-\s]+(\w[\w.-]+)")
 
 # Dockerfile FROM
-_FROM_RE = re.compile(r'^FROM\s+(?:--platform=\S+\s+)?(\S+?)(?:\s+AS\s+(\w+))?$', re.MULTILINE | re.IGNORECASE)
+_FROM_RE = re.compile(
+    r"^FROM\s+(?:--platform=\S+\s+)?(\S+?)(?:\s+AS\s+(\w+))?$",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 
 def collect_compose_files(root: Path, patterns: list):
@@ -65,7 +75,8 @@ def parse_compose_yaml(source: str):
                 if not isinstance(cfg, dict):
                     cfg = {}
                 image = cfg.get("image") or (
-                    f"build:{cfg['build']['context']}" if isinstance(cfg.get("build"), dict)
+                    f"build:{cfg['build']['context']}"
+                    if isinstance(cfg.get("build"), dict)
                     else ("build:." if cfg.get("build") else None)
                 )
                 deps_raw = cfg.get("depends_on", [])
@@ -92,17 +103,17 @@ def parse_compose_yaml(source: str):
 
 def analyze(root: Path, group_map: dict):
     """Returns (nodes, external_nodes, links_map, meta)."""
-    patterns      = load_gitignore_patterns(root)
+    patterns = load_gitignore_patterns(root)
     compose_files = collect_compose_files(root, patterns)
-    dockerfiles   = collect_dockerfiles(root, patterns)
+    dockerfiles = collect_dockerfiles(root, patterns)
 
     if not compose_files and not dockerfiles:
         return [], [], {}, {"total_files": 0, "total_loc": 0}
 
-    nodes      = []
-    links_map  = {}
+    nodes = []
+    links_map = {}
     ext_images = {}
-    total_loc  = 0
+    total_loc = 0
     total_files = 0
 
     for cf in compose_files:
@@ -112,7 +123,7 @@ def analyze(root: Path, group_map: dict):
         except OSError:
             continue
 
-        total_loc   += source.count("\n") + 1
+        total_loc += source.count("\n") + 1
         total_files += 1
 
         services = parse_compose_yaml(source)
@@ -121,7 +132,7 @@ def analyze(root: Path, group_map: dict):
 
         # Compose-file directory as a pseudo-group
         compose_dir = str(cf.parent.relative_to(root)) if cf.parent != root else ""
-        group_key   = compose_dir or "."
+        group_key = compose_dir or "."
         if group_key not in group_map:
             group_map[group_key] = len(group_map)
         grp = group_map[group_key]
@@ -131,17 +142,19 @@ def analyze(root: Path, group_map: dict):
 
         for svc_name, svc_cfg in services.items():
             node_id = f"{prefix}{svc_name}"
-            image   = svc_cfg.get("image") or ""
-            nodes.append({
-                "id":       node_id,
-                "type":     "service",
-                "language": "docker",
-                "image":    image,
-                "size":     60,
-                "loc":      0,
-                "group":    grp,
-                "imports":  len(svc_cfg.get("depends_on", [])),
-            })
+            image = svc_cfg.get("image") or ""
+            nodes.append(
+                {
+                    "id": node_id,
+                    "type": "service",
+                    "language": "docker",
+                    "image": image,
+                    "size": 60,
+                    "loc": 0,
+                    "group": grp,
+                    "imports": len(svc_cfg.get("depends_on", [])),
+                }
+            )
 
         # Links from depends_on
         for svc_name, svc_cfg in services.items():
@@ -158,13 +171,13 @@ def analyze(root: Path, group_map: dict):
                 img_key = image.split(":")[0]  # strip tag
                 if img_key not in ext_images:
                     ext_images[img_key] = {
-                        "id":       img_key,
-                        "type":     "import",
+                        "id": img_key,
+                        "type": "import",
                         "language": "docker",
-                        "size":     40,
-                        "loc":      0,
-                        "group":    9000,
-                        "imports":  0,
+                        "size": 40,
+                        "loc": 0,
+                        "group": 9000,
+                        "imports": 0,
                     }
                 key = (f"{prefix}{svc_name}", img_key)
                 links_map[key] = links_map.get(key, 0) + 1
@@ -176,31 +189,33 @@ def analyze(root: Path, group_map: dict):
         except OSError:
             continue
 
-        total_loc   += source.count("\n") + 1
+        total_loc += source.count("\n") + 1
         total_files += 1
 
         # Create a node for the Dockerfile itself
-        df_dir    = str(df.parent.relative_to(root)) if df.parent != root else ""
+        df_dir = str(df.parent.relative_to(root)) if df.parent != root else ""
         group_key = df_dir or "."
         if group_key not in group_map:
             group_map[group_key] = len(group_map)
 
-        nodes.append({
-            "id":       rel,
-            "type":     "service",
-            "language": "docker",
-            "image":    "",
-            "size":     source.count("\n") + 1,
-            "loc":      source.count("\n") + 1,
-            "group":    group_map[group_key],
-            "imports":  0,
-        })
+        nodes.append(
+            {
+                "id": rel,
+                "type": "service",
+                "language": "docker",
+                "image": "",
+                "size": source.count("\n") + 1,
+                "loc": source.count("\n") + 1,
+                "group": group_map[group_key],
+                "imports": 0,
+            }
+        )
 
         # FROM stages — base images as external imports
         build_stages = {}  # stage alias → True
         for m in _FROM_RE.finditer(source):
             base_img = m.group(1)
-            alias    = m.group(2)
+            alias = m.group(2)
             if alias:
                 build_stages[alias] = True
             # Skip scratch and local build stages
@@ -209,18 +224,23 @@ def analyze(root: Path, group_map: dict):
             img_key = base_img.split(":")[0]
             if img_key not in ext_images:
                 ext_images[img_key] = {
-                    "id":       img_key,
-                    "type":     "import",
+                    "id": img_key,
+                    "type": "import",
                     "language": "docker",
-                    "size":     40,
-                    "loc":      0,
-                    "group":    9000,
-                    "imports":  0,
+                    "size": 40,
+                    "loc": 0,
+                    "group": 9000,
+                    "imports": 0,
                 }
             key = (rel, img_key)
             links_map[key] = links_map.get(key, 0) + 1
 
-    return nodes, list(ext_images.values()), links_map, {
-        "total_files": total_files,
-        "total_loc":   total_loc,
-    }
+    return (
+        nodes,
+        list(ext_images.values()),
+        links_map,
+        {
+            "total_files": total_files,
+            "total_loc": total_loc,
+        },
+    )
