@@ -242,7 +242,7 @@ def _load_path_aliases(root: Path) -> "dict[str, list[str]]":
             paths = data.get("compilerOptions", {}).get("paths", {})
             if paths:
                 return paths
-        except Exception:
+        except (json.JSONDecodeError, KeyError, AttributeError, TypeError, OSError):
             continue
     return {}
 
@@ -301,7 +301,7 @@ def resolve_internal(
     mod: str, file_path: Path, root: Path, all_files: set, aliases=None
 ):
     """Resolve a relative/absolute module path to a repo-relative file path."""
-    if not (mod.startswith(".") or mod.startswith("/")):
+    if not (mod.startswith((".", "/"))):
         # Try path aliases before giving up (e.g. "@/lib/auth", "~/utils")
         if aliases:
             resolved = _resolve_alias(mod, aliases, root, all_files)

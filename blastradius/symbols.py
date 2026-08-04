@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 from blastradius.analyzers.base import is_ignored, is_skip_dir, load_gitignore_patterns
@@ -72,7 +72,7 @@ def build_symbol_index(repo_path: str) -> dict:
 
     return {
         "meta": {
-            "generated": str(date.today()),
+            "generated": str(datetime.now(timezone.utc).date()),
             "repo": root.name + "/",
             "total_symbols": total,
         },
@@ -108,7 +108,7 @@ def write_inline(symbol_data: dict, index_path: Path) -> None:
             pkg_syms = [
                 sym
                 for rel, syms in by_file.items()
-                if (rel.startswith(nid + "/") or rel.startswith(nid + "\\"))
+                if (rel.startswith((nid + "/", nid + "\\")))
                 for sym in syms
             ]
             if pkg_syms:

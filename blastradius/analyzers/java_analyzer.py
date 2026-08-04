@@ -80,12 +80,7 @@ def node_type(path: Path) -> str:
     ):
         return "config"
     # Test files
-    if (
-        "test" in parts_lower
-        or stem_lower.endswith("test")
-        or stem_lower.endswith("tests")
-        or stem_lower.endswith("spec")
-    ):
+    if "test" in parts_lower or stem_lower.endswith(("test", "tests", "spec")):
         return "module"
     # Route/Controller
     if any(stem_lower.endswith(s) for s in _ROUTE_STEMS):
@@ -117,7 +112,7 @@ def analyze(root: Path, group_map: dict):
     if not jk_files:
         return [], [], {}, {"total_files": 0, "total_loc": 0}
 
-    all_rel = {str(f.relative_to(root)) for f in jk_files}
+    {str(f.relative_to(root)) for f in jk_files}
 
     # ── Pass 1: build FQN → rel_path map ─────────────────────────────────────
     fqn_map = {}  # "com.example.pkg.Foo" → "src/main/java/com/example/pkg/Foo.java"

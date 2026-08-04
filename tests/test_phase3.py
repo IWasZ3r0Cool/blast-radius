@@ -85,12 +85,9 @@ def _make_repo_with_symbols(tmp_path: Path) -> Path:
 
 # ── sqlite-vec availability ───────────────────────────────────────────────────
 
-try:
-    import sqlite_vec as _sv
+import importlib.util
 
-    HAS_SQLITE_VEC = True
-except ImportError:
-    HAS_SQLITE_VEC = False
+HAS_SQLITE_VEC = importlib.util.find_spec("sqlite_vec") is not None
 
 
 # ── Test 1: FTS search returns relevant results ───────────────────────────────
@@ -235,7 +232,7 @@ def test_search_degrades_endpoint_unreachable(tmp_path: Path) -> None:
     # Must not raise — should degrade and still return FTS results
     try:
         results = hybrid_search(store=store, query="greet", k=5, provider=bad_provider)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         pytest.fail(f"hybrid_search raised unexpectedly: {exc}")
     finally:
         store.close()

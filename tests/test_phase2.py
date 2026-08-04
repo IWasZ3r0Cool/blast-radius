@@ -90,7 +90,7 @@ def test_as_of_impact_differs_from_head(tmp_path: Path) -> None:
     from blastradius.index import db_path_for, git_reachable
     from blastradius.store import Store
 
-    repo, c1, c2, c3 = _make_temporal_repo(tmp_path)
+    repo, _c1, c2, c3 = _make_temporal_repo(tmp_path)
     db_path = db_path_for(repo)
     store = Store(db_path)
 
@@ -124,7 +124,7 @@ def test_changed_since_edges(tmp_path: Path) -> None:
     from blastradius.index import db_path_for, git_reachable
     from blastradius.store import Store
 
-    repo, c1, c2, c3 = _make_temporal_repo(tmp_path)
+    repo, c1, _c2, _c3 = _make_temporal_repo(tmp_path)
     db_path = db_path_for(repo)
     store = Store(db_path)
 
@@ -153,9 +153,9 @@ def test_history_backfill_commits(tmp_path: Path) -> None:
     shutil.copytree(FIXTURE_SRC, repo)
     _setup_git(repo)
 
-    c1 = _commit_all(repo, "init")
+    _commit_all(repo, "init")
     (repo / "models.py").write_text((repo / "models.py").read_text() + "\n# v2\n")
-    c2 = _commit_all(repo, "modify models")
+    _commit_all(repo, "modify models")
 
     # Analyze at HEAD only (don't analyze at c1)
     _run_analyze(repo)
@@ -242,6 +242,7 @@ def test_history_no_working_tree_change(tmp_path: Path) -> None:
         cwd=repo,
         capture_output=True,
         text=True,
+        check=True,
     ).stdout.strip()
     assert status == "", f"Working tree dirty after backfill:\n{status}"
 
@@ -262,7 +263,7 @@ def test_changed_since_added_file(tmp_path: Path) -> None:
 
     # Add a new file and commit
     (repo / "new_module.py").write_text('"""New module."""\nVALUE = 99\n')
-    c2 = _commit_all(repo, "add new_module")
+    _commit_all(repo, "add new_module")
     _run_analyze(repo)
 
     db_path = db_path_for(repo)

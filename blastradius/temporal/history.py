@@ -36,7 +36,9 @@ _PARSEABLE = frozenset(
 
 
 def _run(cmd: list, cwd: Path, timeout: int = 60) -> str:
-    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    r = subprocess.run(
+        cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+    )
     return r.stdout if r.returncode == 0 else ""
 
 
@@ -265,7 +267,6 @@ def backfill(
     edge_last_seen_alive: dict[tuple, str] = {}
 
     prev_tree: dict[str, str] = {}  # path → blob_hash at previous commit
-    prev_edges: set[tuple] = set()  # (source, target) pairs at previous commit
 
     processed = 0
 
@@ -304,7 +305,7 @@ def backfill(
         # Edges whose source is NOT in changed set: if source still in tree,
         # the edge still exists — advance its last-seen.
         for key in list(edge_first_seen):
-            src, tgt, kind = key
+            src, tgt, _kind = key
             if src not in changed and src in curr_tree and tgt in curr_tree:
                 edge_last_seen_alive[key] = h
 

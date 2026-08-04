@@ -36,9 +36,10 @@ def _git_head(root: Path) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         return r.stdout.strip() if r.returncode == 0 else None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -51,6 +52,7 @@ def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         paths = set()
         for line in r.stdout.splitlines():
@@ -58,7 +60,7 @@ def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
             if len(parts) >= 2:
                 paths.add(parts[-1])  # rename lines have 3 parts; last is dest
         return paths
-    except Exception:
+    except Exception:  # noqa: BLE001
         return set()
 
 
@@ -71,6 +73,7 @@ def git_modified(root: Path, from_ref: str, to_ref: str = "HEAD") -> list[str]:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         modified = []
         for line in r.stdout.splitlines():
@@ -78,7 +81,7 @@ def git_modified(root: Path, from_ref: str, to_ref: str = "HEAD") -> list[str]:
             if len(parts) >= 2 and parts[0].startswith("M"):
                 modified.append(parts[-1])
         return modified
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
 
 
@@ -91,11 +94,12 @@ def git_reachable(root: Path, ref: str) -> set:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
         if r.returncode != 0:
             return set()
         return {line.strip() for line in r.stdout.splitlines() if line.strip()}
-    except Exception:
+    except Exception:  # noqa: BLE001
         return set()
 
 
@@ -108,9 +112,10 @@ def git_resolve(root: Path, ref: str) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         return r.stdout.strip() if r.returncode == 0 else None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -158,7 +163,7 @@ def _embed_new_symbols(store) -> None:
         store.set_meta("embedding_model", model)
         store._conn.commit()
         print(f"Embedded {len(ids)} symbol(s)", file=sys.stderr)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"Warning: embedding failed: {exc}", file=sys.stderr)
 
 
@@ -206,7 +211,7 @@ def build(repo_path: str, output: Path | None = None) -> dict:
 
         symbol_data = build_symbol_index(str(root))
         store.sync_symbols(symbol_data, commit=head_commit)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"Warning: symbol sync failed: {exc}", file=sys.stderr)
 
     # Embed new symbols if an embedding endpoint is configured

@@ -69,7 +69,7 @@ def hybrid_search(
                 _note(sid, "semantic")
             if sem_ids:
                 ranked_lists.append(sem_ids)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[blastradius] semantic search skipped: {exc}", file=sys.stderr)
     elif provider is not None and not store._has_vec:
         print(
@@ -84,7 +84,7 @@ def hybrid_search(
             _note(sid, "fts")
         if fts_ids:
             ranked_lists.append(fts_ids)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"[blastradius] FTS search skipped: {exc}", file=sys.stderr)
 
     # 3. Graph expansion: supplement when primary signals are sparse.

@@ -61,7 +61,7 @@ def parse_cargo_deps(root: Path):
         return set()
     try:
         data = tomllib.loads(cargo_toml.read_text(errors="replace"))
-    except Exception:
+    except Exception:  # noqa: BLE001
         return set()
     deps = set()
     for section in ("dependencies", "dev-dependencies", "build-dependencies"):
@@ -98,7 +98,7 @@ def resolve_use_internal(use_path: str, root: Path, all_files: set):
     """Resolve crate::a::b to a/b.rs or a/b/mod.rs (best-effort)."""
     if use_path.startswith("crate::"):
         rel = use_path[7:].replace("::", "/")
-    elif use_path.startswith("super::") or use_path.startswith("self::"):
+    elif use_path.startswith(("super::", "self::")):
         return None  # relative — too complex without full module tree
     else:
         return None

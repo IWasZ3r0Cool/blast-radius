@@ -48,9 +48,12 @@ _FROM_RE = re.compile(
 def collect_compose_files(root: Path, patterns: list):
     found = []
     for p in root.rglob("*"):
-        if p.name in COMPOSE_NAMES:
-            if not is_skip_dir(p) and not is_ignored(p, root, patterns):
-                found.append(p)
+        if (
+            p.name in COMPOSE_NAMES
+            and not is_skip_dir(p)
+            and not is_ignored(p, root, patterns)
+        ):
+            found.append(p)
     return sorted(found)
 
 
@@ -88,14 +91,14 @@ def parse_compose_yaml(source: str):
                     deps = []
                 result[str(name)] = {"image": image, "depends_on": deps}
             return result
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
     # Regex fallback
     result = {}
     for m in _SVC_NAME_RE.finditer(source):
         result[m.group(1)] = {"image": None, "depends_on": []}
     for m in _DEPENDS_RE.finditer(source):
-        svc_start = source.rfind("\n  ", 0, m.start())
+        source.rfind("\n  ", 0, m.start())
         # This fallback is imprecise; skip dependency mapping
         _ = [i.group(1) for i in _DEP_ITEM_RE.finditer(m.group(1))]
     return result

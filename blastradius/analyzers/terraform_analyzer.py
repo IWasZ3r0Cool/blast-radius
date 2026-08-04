@@ -9,9 +9,10 @@ Links:
   local module sources, cross-resource references, provider imports.
 """
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
-from typing import Optional
 
 from .base import dir_group, is_ignored, is_skip_dir, load_gitignore_patterns
 
@@ -189,7 +190,7 @@ def analyze(root: Path, group_map: dict):
         parent = str(Path(rel).parent)
         _dir_files_index.setdefault(parent, []).append(rel)
 
-    def _module_entry(target_dir: str) -> Optional[str]:
+    def _module_entry(target_dir: str) -> str | None:
         """Return the canonical .tf file to link to for a module directory."""
         candidates = _dir_files_index.get(target_dir, [])
         if not candidates:

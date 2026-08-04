@@ -88,12 +88,12 @@ def _extract_frontend_calls(source: str):
     seen = set()
     for m in _FETCH_RE.finditer(source):
         p = m.group(1)
-        if p not in seen and (p.startswith("/") or p.startswith("http")):
+        if p not in seen and (p.startswith(("/", "http"))):
             seen.add(p)
             paths.append(p)
     for m in _HTTP_CALL_RE.finditer(source):
         p = m.group(1)
-        if p not in seen and (p.startswith("/") or p.startswith("http")):
+        if p not in seen and (p.startswith(("/", "http"))):
             seen.add(p)
             paths.append(p)
     return paths

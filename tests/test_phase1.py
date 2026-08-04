@@ -45,7 +45,11 @@ def _init_git(repo: Path) -> str:
         ["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True
     )
     return subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
 

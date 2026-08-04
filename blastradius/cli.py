@@ -749,7 +749,7 @@ def _cmd_search(args: argparse.Namespace) -> None:
             provider = OpenAIEmbeddingProvider(
                 endpoint=endpoint, model=model, dims=dims
             )
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     as_of_reachable = None

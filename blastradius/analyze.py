@@ -174,7 +174,7 @@ def analyze(root_path: str) -> dict:
         if analyzer:
             try:
                 add_results(*analyzer.analyze(root, group_map))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"Warning: {lang} analyzer failed: {e}", file=sys.stderr)
 
     for node in all_nodes:
@@ -185,7 +185,7 @@ def analyze(root_path: str) -> dict:
         assign_packages(all_nodes, workspaces)
         if workspaces:
             meta_extra["workspaces"] = list(workspaces.values())
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Warning: monorepo detection failed: {e}", file=sys.stderr)
 
     node_type_map = {n["id"]: n.get("type", "module") for n in all_nodes}
@@ -206,7 +206,7 @@ def analyze(root_path: str) -> dict:
         links.extend(api_links)
         if api_links:
             meta_extra["apiLinks"] = len(api_links)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Warning: cross-language analysis failed: {e}", file=sys.stderr)
 
     return {

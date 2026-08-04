@@ -76,7 +76,7 @@ def node_type(path: Path) -> str:
 def resolve_internal(mod: str, file_path: Path, root: Path, all_files: set):
     """Try to map a require path to a repo-relative .rb file."""
     # require_relative uses ./  or  ../ prefix
-    if mod.startswith("./") or mod.startswith("../"):
+    if mod.startswith(("./", "../")):
         base = file_path.parent
         raw = (base / mod).resolve()
         for candidate in (raw.with_suffix(".rb"), raw):
@@ -151,7 +151,7 @@ def analyze(root: Path, group_map: dict):
             if internal:
                 key = (rel, internal)
                 links_map[key] = links_map.get(key, 0) + 1
-            elif not (mod.startswith("./") or mod.startswith("../")):
+            elif not (mod.startswith(("./", "../"))):
                 # External gem — use top-level name
                 gem = mod.split("/")[0]
                 if gem not in ext_gems:

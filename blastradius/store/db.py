@@ -186,7 +186,7 @@ class Store:
             self._conn.enable_load_extension(False)
             self._vec_dims = int(dims_str)
             self._has_vec = True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[blastradius] sqlite-vec load failed: {exc}", file=sys.stderr)
             self._has_vec = False
 
@@ -578,7 +578,7 @@ class Store:
             return None
 
         nodes = [{"id": r[1]} for r in file_rows]
-        file_id_set = {r[0] for r in file_rows}
+        {r[0] for r in file_rows}
 
         # Edges active at this historical point
         edge_rows = self._conn.execute("""
@@ -718,7 +718,7 @@ class Store:
             self.set_meta("embedding_dims", str(dims))
             self._conn.commit()
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[blastradius] sqlite-vec init failed: {exc}", file=sys.stderr)
             self._has_vec = False
             return False
@@ -853,9 +853,7 @@ class Store:
         first, last, active = row[0], row[1], row[2]
         if first and first not in reachable:
             return False
-        if active == 0 and last and last not in reachable:
-            return False
-        return True
+        return not (active == 0 and last and last not in reachable)
 
     def get_symbol(self, symbol_id: int) -> dict | None:
         """Return symbol metadata dict or None if not found."""

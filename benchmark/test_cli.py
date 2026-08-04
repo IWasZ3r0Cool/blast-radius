@@ -49,7 +49,7 @@ class Results:
 
 def run(cmd: list[str], cwd: str) -> tuple[int, str, str]:
     """Run command, return (returncode, stdout, stderr)."""
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, check=False)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -254,14 +254,14 @@ def main() -> None:
 
     if not Path(index_path).exists():
         print(f"Building index: {exe} analyze {repo}")
-        rc, out, err = run([exe, "analyze", repo], repo)
+        rc, _out, err = run([exe, "analyze", repo], repo)
         if rc != 0 or not Path(index_path).exists():
             print(f"ERROR: Failed to build {index_path}.\n{err}", file=sys.stderr)
             sys.exit(1)
 
     if not Path(sym_path).exists():
         print(f"Building symbol index: {exe} symbols {repo}")
-        rc, out, err = run([exe, "symbols", repo], repo)
+        rc, _out, err = run([exe, "symbols", repo], repo)
         if rc != 0 or not Path(sym_path).exists():
             print(f"ERROR: Failed to build {sym_path}.\n{err}", file=sys.stderr)
             sys.exit(1)

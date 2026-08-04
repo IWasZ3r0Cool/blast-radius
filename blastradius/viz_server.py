@@ -21,7 +21,7 @@ def _run_analysis(repo_path: str, output: Path) -> bool:
     try:
         build(repo_path, output)
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"[analyzer error] {e}", file=sys.stderr)
         return False
 

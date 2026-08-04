@@ -295,7 +295,7 @@ def _call_get_impact(params: dict) -> dict:
     if not blast:
         return {"error": f"No blast data for {file_id}"}
 
-    total = len([n for n in data["nodes"] if not n.get("type") == "import"])
+    total = len([n for n in data["nodes"] if n.get("type") != "import"])
     report = format_markdown(file_id, blast, total)
     return {"file": file_id, "report": report, "blast_score": blast["blast_score"]}
 
@@ -453,7 +453,7 @@ def _call_semantic_search(params: dict) -> dict:
             provider = OpenAIEmbeddingProvider(
                 endpoint=endpoint, model=model, dims=int(dims_str)
             )
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     as_of_reachable = None
@@ -708,7 +708,7 @@ def _handle(msg: dict) -> dict | None:
             return ok(
                 {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return ok(
                 {
                     "content": [{"type": "text", "text": f"Error: {e}"}],

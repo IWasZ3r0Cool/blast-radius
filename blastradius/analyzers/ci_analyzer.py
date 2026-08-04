@@ -27,10 +27,8 @@ def collect_gha_files(root: Path, patterns: list):
     if not workflows_dir.exists():
         return []
     files = []
-    for p in workflows_dir.glob("*.yml"):
-        files.append(p)
-    for p in workflows_dir.glob("*.yaml"):
-        files.append(p)
+    files.extend(workflows_dir.glob("*.yml"))
+    files.extend(workflows_dir.glob("*.yaml"))
     return sorted(files)
 
 
@@ -83,7 +81,7 @@ def parse_gha_workflow(source: str, rel_path: str):
                     dep_id = f"{wf_name}/{dep}"
                     links[(dep_id, node_id)] = 1  # dep must run before job_id
             return nodes, links
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     # Regex fallback: extract job names from top-level keys
@@ -130,7 +128,7 @@ def parse_gitlab_ci(source: str):
                 "before_script",
                 "after_script",
             }
-            stages = data.get("stages", [])
+            data.get("stages", [])
 
             for job_id, job_cfg in data.items():
                 if job_id in RESERVED or not isinstance(job_cfg, dict):
@@ -163,7 +161,7 @@ def parse_gitlab_ci(source: str):
                 for dep in deps:
                     links[(dep, job_id)] = 1
             return nodes, links
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     return [], {}

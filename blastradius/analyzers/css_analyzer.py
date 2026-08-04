@@ -43,11 +43,7 @@ def extract_imports(source: str):
         for m in pattern.finditer(source):
             mod = m.group(1)
             # Skip external URLs and data URIs
-            if (
-                mod.startswith("http")
-                or mod.startswith("//")
-                or mod.startswith("data:")
-            ):
+            if mod.startswith(("http", "//", "data:")):
                 continue
             if mod not in seen:
                 seen.add(mod)

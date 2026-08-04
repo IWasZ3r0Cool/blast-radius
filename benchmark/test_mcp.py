@@ -62,7 +62,7 @@ class MCPClient:
         try:
             self._proc.stdin.close()
             self._proc.wait(timeout=3)
-        except Exception:
+        except Exception:  # noqa: BLE001
             self._proc.kill()
 
 
@@ -107,7 +107,7 @@ def _result_text(response: dict) -> str:
 def _result_data(response: dict) -> dict:
     try:
         return json.loads(_result_text(response))
-    except Exception:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError):
         return {}
 
 
@@ -116,7 +116,7 @@ def _is_error(response: dict) -> bool:
         return True
     try:
         return response["result"].get("isError", False)
-    except Exception:
+    except (KeyError, AttributeError, TypeError):
         return False
 
 
