@@ -6,6 +6,7 @@ Phase-1 change: build() now also syncs graph data to a SQLite store at
 <repo>/.blastradius/index.db.  The JSON write path is unchanged so existing
 consumers keep working without modification.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -15,7 +16,7 @@ import sys
 from pathlib import Path
 
 from blastradius.analyze import analyze
-from blastradius.impact import compute_blast_radius, enrich_nodes, enrich_links
+from blastradius.impact import compute_blast_radius, enrich_links, enrich_nodes
 from blastradius.store import Store
 
 INDEX_FILENAME = "blastradius.json"
@@ -31,10 +32,14 @@ def _git_head(root: Path) -> str | None:
     try:
         r = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=root, capture_output=True, text=True, timeout=10,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
         return r.stdout.strip() if r.returncode == 0 else None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -43,7 +48,11 @@ def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
     try:
         r = subprocess.run(
             ["git", "diff", "--name-status", from_commit, to_commit],
-            cwd=root, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         paths = set()
         for line in r.stdout.splitlines():
@@ -51,7 +60,7 @@ def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
             if len(parts) >= 2:
                 paths.add(parts[-1])  # rename lines have 3 parts; last is dest
         return paths
-    except Exception:
+    except Exception:  # noqa: BLE001
         return set()
 
 
@@ -60,7 +69,11 @@ def git_modified(root: Path, from_ref: str, to_ref: str = "HEAD") -> list[str]:
     try:
         r = subprocess.run(
             ["git", "diff", "--name-status", from_ref, to_ref],
-            cwd=root, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
         modified = []
         for line in r.stdout.splitlines():
@@ -68,7 +81,7 @@ def git_modified(root: Path, from_ref: str, to_ref: str = "HEAD") -> list[str]:
             if len(parts) >= 2 and parts[0].startswith("M"):
                 modified.append(parts[-1])
         return modified
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
 
 
@@ -77,12 +90,16 @@ def git_reachable(root: Path, ref: str) -> set:
     try:
         r = subprocess.run(
             ["git", "log", "--format=%H", ref],
-            cwd=root, capture_output=True, text=True, timeout=60,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
         if r.returncode != 0:
             return set()
         return {line.strip() for line in r.stdout.splitlines() if line.strip()}
-    except Exception:
+    except Exception:  # noqa: BLE001
         return set()
 
 
@@ -91,10 +108,14 @@ def git_resolve(root: Path, ref: str) -> str | None:
     try:
         r = subprocess.run(
             ["git", "rev-parse", ref],
-            cwd=root, capture_output=True, text=True, timeout=10,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
         return r.stdout.strip() if r.returncode == 0 else None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -113,6 +134,7 @@ def _embed_new_symbols(store) -> None:
     Silently skips if any required env var is missing or if the call fails.
     """
     import os
+
     endpoint = os.environ.get("BLASTRADIUS_EMBEDDING_ENDPOINT", "")
     model = os.environ.get("BLASTRADIUS_EMBEDDING_MODEL", "")
     dims_str = os.environ.get("BLASTRADIUS_EMBEDDING_DIMS", "")
@@ -132,6 +154,7 @@ def _embed_new_symbols(store) -> None:
 
     try:
         from blastradius.semantic.provider import OpenAIEmbeddingProvider
+
         provider = OpenAIEmbeddingProvider(endpoint=endpoint, model=model, dims=dims)
         ids = [p[0] for p in pairs]
         texts = [p[1] for p in pairs]
@@ -140,7 +163,7 @@ def _embed_new_symbols(store) -> None:
         store.set_meta("embedding_model", model)
         store._conn.commit()
         print(f"Embedded {len(ids)} symbol(s)", file=sys.stderr)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"Warning: embedding failed: {exc}", file=sys.stderr)
 
 
@@ -185,9 +208,10 @@ def build(repo_path: str, output: Path | None = None) -> dict:
     # Build and sync symbol index
     try:
         from blastradius.symbols import build_symbol_index
+
         symbol_data = build_symbol_index(str(root))
         store.sync_symbols(symbol_data, commit=head_commit)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"Warning: symbol sync failed: {exc}", file=sys.stderr)
 
     # Embed new symbols if an embedding endpoint is configured

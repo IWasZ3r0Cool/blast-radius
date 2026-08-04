@@ -181,6 +181,7 @@ The design doc requires graceful degradation: if `sqlite-vec` can't load (not in
 ```python
 try:
     import sqlite_vec  # or whatever
+
     HAS_SQLITE_VEC = True
 except ImportError:
     HAS_SQLITE_VEC = False

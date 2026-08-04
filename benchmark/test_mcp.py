@@ -9,6 +9,7 @@ Starts the MCP server as a subprocess, sends JSON-RPC messages, validates respon
 All tools tested: analyze_repo, get_impact, get_dependencies,
 get_high_blast_files, build_symbol_index, lookup_symbol.
 """
+
 from __future__ import annotations
 
 import json
@@ -61,7 +62,7 @@ class MCPClient:
         try:
             self._proc.stdin.close()
             self._proc.wait(timeout=3)
-        except Exception:
+        except Exception:  # noqa: BLE001
             self._proc.kill()
 
 
@@ -106,7 +107,7 @@ def _result_text(response: dict) -> str:
 def _result_data(response: dict) -> dict:
     try:
         return json.loads(_result_text(response))
-    except Exception:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError):
         return {}
 
 
@@ -115,7 +116,7 @@ def _is_error(response: dict) -> bool:
         return True
     try:
         return response["result"].get("isError", False)
-    except Exception:
+    except (KeyError, AttributeError, TypeError):
         return False
 
 
@@ -124,11 +125,14 @@ def _is_error(response: dict) -> bool:
 # ---------------------------------------------------------------------------
 def test_initialize(client: MCPClient, r: Results) -> None:
     print("\n── initialize ──")
-    resp = client.send("initialize", {
-        "protocolVersion": "2024-11-05",
-        "capabilities": {},
-        "clientInfo": {"name": "test", "version": "0.0.1"},
-    })
+    resp = client.send(
+        "initialize",
+        {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0.0.1"},
+        },
+    )
     r.check("no error", "error" not in resp, str(resp.get("error")))
     result = resp.get("result", {})
     r.check("protocolVersion present", "protocolVersion" in result)
@@ -142,8 +146,14 @@ def test_tools_list(client: MCPClient, r: Results) -> None:
     resp = client.send("tools/list")
     r.check("no error", "error" not in resp, str(resp.get("error")))
     tools = {t["name"] for t in resp.get("result", {}).get("tools", [])}
-    for name in ["analyze_repo", "get_impact", "get_dependencies",
-                 "get_high_blast_files", "build_symbol_index", "lookup_symbol"]:
+    for name in [
+        "analyze_repo",
+        "get_impact",
+        "get_dependencies",
+        "get_high_blast_files",
+        "build_symbol_index",
+        "lookup_symbol",
+    ]:
         r.check(f"tool registered: {name}", name in tools)
 
 
@@ -189,13 +199,19 @@ def test_get_high_blast_files(client: MCPClient, r: Results) -> None:
     r.check("no error", not _is_error(resp), _result_text(resp))
     data = _result_data(resp)
     r.check("files list present", isinstance(data.get("files"), list))
-    r.check("count matches list length", data.get("count") == len(data.get("files", [])))
+    r.check(
+        "count matches list length", data.get("count") == len(data.get("files", []))
+    )
     if data.get("files"):
         first = data["files"][0]
         r.check("file has blast_score", "blast_score" in first)
-        r.check("results sorted descending",
-                all(data["files"][i]["blast_score"] >= data["files"][i+1]["blast_score"]
-                    for i in range(len(data["files"]) - 1)))
+        r.check(
+            "results sorted descending",
+            all(
+                data["files"][i]["blast_score"] >= data["files"][i + 1]["blast_score"]
+                for i in range(len(data["files"]) - 1)
+            ),
+        )
 
     # High threshold should return empty list, not crash
     resp2 = client.call_tool("get_high_blast_files", {"threshold": 9999})
@@ -214,7 +230,9 @@ def test_build_symbol_index(client: MCPClient, r: Results, repo: str) -> None:
     r.check("output path present", "output" in data)
 
 
-def test_lookup_symbol(client: MCPClient, r: Results, symbols: list[tuple[str, str, int]]) -> None:
+def test_lookup_symbol(
+    client: MCPClient, r: Results, symbols: list[tuple[str, str, int]]
+) -> None:
     print("\n── lookup_symbol ──")
 
     for sym_name, expected_file, expected_line in symbols[:2]:
@@ -228,15 +246,23 @@ def test_lookup_symbol(client: MCPClient, r: Results, symbols: list[tuple[str, s
             r.check("match has file", "file" in m)
             r.check("match has line", "line" in m)
             r.check("match has kind", "kind" in m)
-            r.check(f"correct file ({expected_file})",
-                    expected_file in m.get("file", ""), m.get("file"))
-            r.check(f"correct line ({expected_line})",
-                    m.get("line") == expected_line, f"got line {m.get('line')}")
+            r.check(
+                f"correct file ({expected_file})",
+                expected_file in m.get("file", ""),
+                m.get("file"),
+            )
+            r.check(
+                f"correct line ({expected_line})",
+                m.get("line") == expected_line,
+                f"got line {m.get('line')}",
+            )
 
     # Unknown symbol
     resp3 = client.call_tool("lookup_symbol", {"name": "__nonexistent_symbol_xyz__"})
     data3 = _result_data(resp3)
-    r.check("unknown symbol returns found=false", data3.get("found") is False, str(data3))
+    r.check(
+        "unknown symbol returns found=false", data3.get("found") is False, str(data3)
+    )
 
 
 def test_unknown_tool(client: MCPClient, r: Results) -> None:
@@ -258,6 +284,7 @@ def main() -> None:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     import argparse
+
     parser = argparse.ArgumentParser(description="MCP server integration tests")
     parser.add_argument("--repo", default=".", help="Repo path (default: .)")
     parser.add_argument(
@@ -272,26 +299,31 @@ def main() -> None:
 
     print(f"Repo     : {repo}")
     print(f"Command  : {' '.join(command)}")
-    print(f"Starting MCP server…")
+    print("Starting MCP server…")
 
     client = MCPClient(command, cwd=repo)
     time.sleep(0.3)  # let server start
 
     # Discover test fixtures from the repo's own indexes
     index_file = Path(repo) / "blastradius.json"
-    sym_file   = Path(repo) / "symbolindex.json"
+    sym_file = Path(repo) / "symbolindex.json"
 
     probe_file = "."
     if index_file.exists():
         index_data = json.loads(index_file.read_text())
-        nodes = [n["id"] for n in index_data.get("nodes", []) if n.get("type") != "import"]
+        nodes = [
+            n["id"] for n in index_data.get("nodes", []) if n.get("type") != "import"
+        ]
         if nodes:
             # Pick the node with the highest blast score as a good probe target
             scored = sorted(
                 index_data.get("nodes", []),
-                key=lambda n: n.get("blast_score", 0), reverse=True,
+                key=lambda n: n.get("blast_score", 0),
+                reverse=True,
             )
-            probe_file = next((n["id"] for n in scored if n.get("type") != "import"), nodes[0])
+            probe_file = next(
+                (n["id"] for n in scored if n.get("type") != "import"), nodes[0]
+            )
             print(f"Probe file: {probe_file}")
 
     probe_symbols: list[tuple[str, str, int]] = []

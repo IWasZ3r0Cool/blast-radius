@@ -11,6 +11,7 @@ Frontend detection:
   fetch('/path'), axios.get('/path'), api.get('/path'),
   apiClient.post('/path'), http.get('/path')
 """
+
 import re
 from pathlib import Path
 
@@ -56,10 +57,10 @@ def _normalize(path: str) -> str:
     # Strip query / fragment
     path = path.split("?")[0].split("#")[0]
     # Replace path parameters with <p>
-    path = re.sub(r"\{[^}]+\}", "<p>", path)    # {param}
-    path = re.sub(r":<[^>]+>", ":<p>", path)     # :<type>
-    path = re.sub(r":[A-Za-z_]\w*", "<p>", path) # :param (express style)
-    path = re.sub(r"\$\{[^}]+\}", "<p>", path)   # ${var} (template literal)
+    path = re.sub(r"\{[^}]+\}", "<p>", path)  # {param}
+    path = re.sub(r":<[^>]+>", ":<p>", path)  # :<type>
+    path = re.sub(r":[A-Za-z_]\w*", "<p>", path)  # :param (express style)
+    path = re.sub(r"\$\{[^}]+\}", "<p>", path)  # ${var} (template literal)
     path = re.sub(r"<[A-Za-z_][^>]*>", "<p>", path)  # <int:id>
     # Regex anchors (Django)
     path = path.lstrip("^").rstrip("$").rstrip("/")
@@ -84,15 +85,15 @@ def _extract_python_routes(source: str):
 def _extract_frontend_calls(source: str):
     """Return list of API paths called from a JS/TS file."""
     paths = []
-    seen  = set()
+    seen = set()
     for m in _FETCH_RE.finditer(source):
         p = m.group(1)
-        if p not in seen and (p.startswith("/") or p.startswith("http")):
+        if p not in seen and (p.startswith(("/", "http"))):
             seen.add(p)
             paths.append(p)
     for m in _HTTP_CALL_RE.finditer(source):
         p = m.group(1)
-        if p not in seen and (p.startswith("/") or p.startswith("http")):
+        if p not in seen and (p.startswith(("/", "http"))):
             seen.add(p)
             paths.append(p)
     return paths
@@ -127,10 +128,12 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
 
     # ── Step 1: collect Python route info ────────────────────────────────────
     # First pass: find include_router calls to build module→prefix map
-    include_prefix: dict[str, str] = {}   # module_alias → prefix
+    include_prefix: dict[str, str] = {}  # module_alias → prefix
     for f in root.rglob("*.py"):
-        if any(part in {".venv", "venv", "env", "__pycache__", "node_modules"}
-               for part in f.parts):
+        if any(
+            part in {".venv", "venv", "env", "__pycache__", "node_modules"}
+            for part in f.parts
+        ):
             continue
         try:
             source = f.read_text(errors="replace")
@@ -142,8 +145,10 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
     # Second pass: collect routes per file with their prefix
     py_routes: dict[str, list[str]] = {}  # rel_path → [full_paths]
     for f in root.rglob("*.py"):
-        if any(part in {".venv", "venv", "env", "__pycache__", "node_modules"}
-               for part in f.parts):
+        if any(
+            part in {".venv", "venv", "env", "__pycache__", "node_modules"}
+            for part in f.parts
+        ):
             continue
         rel = str(f.relative_to(root))
         if rel not in node_ids:
@@ -158,8 +163,8 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
             continue
 
         # Try to find the prefix for this file
-        stem    = f.stem   # e.g., "auth"
-        prefix  = include_prefix.get(stem, "")
+        stem = f.stem  # e.g., "auth"
+        prefix = include_prefix.get(stem, "")
 
         # Also check if APIRouter is declared with a prefix in this file
         m = _APIROUTER_PREFIX_RE.search(source)
@@ -208,7 +213,10 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
     for js_file, calls in js_calls.items():
         for call_path in calls:
             # Skip clearly non-API paths
-            if any(call_path.endswith(ext) for ext in (".js", ".css", ".png", ".svg", ".ico")):
+            if any(
+                call_path.endswith(ext)
+                for ext in (".js", ".css", ".png", ".svg", ".ico")
+            ):
                 continue
 
             # Direct normalised match
@@ -226,11 +234,13 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
                 pair = (js_file, py_file)
                 if pair not in seen_pairs:
                     seen_pairs.add(pair)
-                    new_links.append({
-                        "source": js_file,
-                        "target": py_file,
-                        "weight": 1,
-                        "kind":   "api-call",
-                    })
+                    new_links.append(
+                        {
+                            "source": js_file,
+                            "target": py_file,
+                            "weight": 1,
+                            "kind": "api-call",
+                        }
+                    )
 
     return new_links

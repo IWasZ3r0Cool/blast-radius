@@ -1,26 +1,46 @@
 """Dispatcher: detect languages, delegate to per-language analyzers."""
-import json
+
 import sys
 from pathlib import Path
 
 from blastradius.analyzers import (
-    python_analyzer, js_analyzer, css_analyzer, go_analyzer,
-    ruby_analyzer, rust_analyzer, java_analyzer, php_analyzer,
-    docker_analyzer, ci_analyzer, schema_analyzer, terraform_analyzer,
+    ci_analyzer,
+    css_analyzer,
+    docker_analyzer,
+    go_analyzer,
+    java_analyzer,
+    js_analyzer,
+    php_analyzer,
+    python_analyzer,
+    ruby_analyzer,
+    rust_analyzer,
+    schema_analyzer,
+    terraform_analyzer,
 )
 from blastradius.analyzers.cross_lang_analyzer import find_api_boundaries
-from blastradius.analyzers.monorepo_analyzer import detect_workspaces, assign_packages
+from blastradius.analyzers.monorepo_analyzer import assign_packages, detect_workspaces
 
 _SKIP = {
-    "__pycache__", ".venv", "venv", "env", ".git",
-    "node_modules", "dist", "build", ".next",
-    "target", "vendor", ".bundle",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "env",
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+    "target",
+    "vendor",
+    ".bundle",
 }
 
 
 def _any_match(root: Path, globs: list) -> bool:
     return any(
-        p for g in globs for p in root.rglob(g)
+        p
+        for g in globs
+        for p in root.rglob(g)
         if not any(part in _SKIP for part in p.parts)
     )
 
@@ -29,7 +49,9 @@ def detect_languages(root: Path) -> list:
     langs = []
     if _any_match(root, ["*.py"]):
         langs.append("python")
-    if (root / "package.json").exists() or _any_match(root, ["*.js", "*.ts", "*.jsx", "*.tsx", "*.mjs", "*.vue"]):
+    if (root / "package.json").exists() or _any_match(
+        root, ["*.js", "*.ts", "*.jsx", "*.tsx", "*.mjs", "*.vue"]
+    ):
         langs.append("javascript")
     if _any_match(root, ["*.css", "*.scss", "*.sass", "*.less", "*.styl"]):
         langs.append("css")
@@ -43,11 +65,21 @@ def detect_languages(root: Path) -> list:
         langs.append("java")
     if (root / "composer.json").exists() or _any_match(root, ["*.php"]):
         langs.append("php")
-    compose_names = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
-    if any((root / n).exists() for n in compose_names) or _any_match(root, ["Dockerfile*"]):
+    compose_names = [
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+    ]
+    if any((root / n).exists() for n in compose_names) or _any_match(
+        root, ["Dockerfile*"]
+    ):
         langs.append("docker")
-    if (root / ".github" / "workflows").exists() or \
-       (root / ".gitlab-ci.yml").exists() or (root / ".gitlab-ci.yaml").exists():
+    if (
+        (root / ".github" / "workflows").exists()
+        or (root / ".gitlab-ci.yml").exists()
+        or (root / ".gitlab-ci.yaml").exists()
+    ):
         langs.append("ci")
     if _any_match(root, ["*.sql", "*.prisma"]):
         langs.append("schema")
@@ -61,24 +93,24 @@ def merge_links(target: dict, source: dict) -> None:
         target[k] = target.get(k, 0) + v
 
 
-_INFRA_TYPES   = {"service", "pipeline", "database"}
+_INFRA_TYPES = {"service", "pipeline", "database"}
 _FRONTEND_LANGS = {"javascript", "typescript", "vue", "css", "scss", "less", "sass"}
-_BACKEND_LANGS  = {"python", "go", "ruby", "rust", "java", "kotlin", "php"}
-_INFRA_LANGS    = {"docker", "github-actions", "gitlab-ci", "sql", "prisma", "terraform"}
+_BACKEND_LANGS = {"python", "go", "ruby", "rust", "java", "kotlin", "php"}
+_INFRA_LANGS = {"docker", "github-actions", "gitlab-ci", "sql", "prisma", "terraform"}
 
 _ANALYZERS = {
-    "python":     python_analyzer,
+    "python": python_analyzer,
     "javascript": js_analyzer,
-    "css":        css_analyzer,
-    "go":         go_analyzer,
-    "ruby":       ruby_analyzer,
-    "rust":       rust_analyzer,
-    "java":       java_analyzer,
-    "php":        php_analyzer,
-    "docker":     docker_analyzer,
-    "ci":         ci_analyzer,
-    "schema":     schema_analyzer,
-    "terraform":  terraform_analyzer,
+    "css": css_analyzer,
+    "go": go_analyzer,
+    "ruby": ruby_analyzer,
+    "rust": rust_analyzer,
+    "java": java_analyzer,
+    "php": php_analyzer,
+    "docker": docker_analyzer,
+    "ci": ci_analyzer,
+    "schema": schema_analyzer,
+    "terraform": terraform_analyzer,
 }
 
 
@@ -115,13 +147,13 @@ def analyze(root_path: str) -> dict:
     if not langs:
         print(f"Warning: no supported languages detected in {root}", file=sys.stderr)
 
-    group_map   = {}
-    all_nodes   = []
-    all_links   = {}
-    ext_seen    = set()
+    group_map = {}
+    all_nodes = []
+    all_links = {}
+    ext_seen = set()
     total_files = 0
-    total_loc   = 0
-    meta_extra  = {}
+    total_loc = 0
+    meta_extra = {}
 
     def add_results(nodes, ext_nodes, links_map, meta):
         nonlocal total_files, total_loc
@@ -132,7 +164,7 @@ def analyze(root_path: str) -> dict:
                 ext_seen.add(en["id"])
         merge_links(all_links, links_map)
         total_files += meta.get("total_files", 0)
-        total_loc   += meta.get("total_loc", 0)
+        total_loc += meta.get("total_loc", 0)
         for key in ("framework", "packageManager"):
             if meta.get(key):
                 meta_extra.setdefault(key, meta[key])
@@ -142,7 +174,7 @@ def analyze(root_path: str) -> dict:
         if analyzer:
             try:
                 add_results(*analyzer.analyze(root, group_map))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"Warning: {lang} analyzer failed: {e}", file=sys.stderr)
 
     for node in all_nodes:
@@ -153,7 +185,7 @@ def analyze(root_path: str) -> dict:
         assign_packages(all_nodes, workspaces)
         if workspaces:
             meta_extra["workspaces"] = list(workspaces.values())
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Warning: monorepo detection failed: {e}", file=sys.stderr)
 
     node_type_map = {n["id"]: n.get("type", "module") for n in all_nodes}
@@ -162,7 +194,9 @@ def analyze(root_path: str) -> dict:
             "source": s,
             "target": t,
             "weight": w,
-            "kind":   link_kind(node_type_map.get(s, "module"), node_type_map.get(t, "module")),
+            "kind": link_kind(
+                node_type_map.get(s, "module"), node_type_map.get(t, "module")
+            ),
         }
         for (s, t), w in all_links.items()
     ]
@@ -172,15 +206,15 @@ def analyze(root_path: str) -> dict:
         links.extend(api_links)
         if api_links:
             meta_extra["apiLinks"] = len(api_links)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Warning: cross-language analysis failed: {e}", file=sys.stderr)
 
     return {
         "meta": {
-            "root":        str(root.name) + "/",
+            "root": str(root.name) + "/",
             "total_files": total_files,
-            "total_loc":   total_loc,
-            "languages":   langs,
+            "total_loc": total_loc,
+            "languages": langs,
             **meta_extra,
         },
         "nodes": all_nodes,

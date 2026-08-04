@@ -1,12 +1,15 @@
 """Python repository analyzer (AST-based)."""
+
 import ast
 import sys
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir, dir_group
+from .base import dir_group, is_ignored, is_skip_dir, load_gitignore_patterns
 
 CONFIG_NAMES = {"config", "settings", "constants", "env", "configuration", "conf"}
-STDLIB_TOP = set(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else set()
+STDLIB_TOP = (
+    set(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else set()
+)
 
 
 def collect_files(root: Path, patterns: list) -> list[Path]:
@@ -120,15 +123,17 @@ def analyze(root: Path, group_map: dict):
 
         imports_list = parse_imports(tree) if tree else []
 
-        nodes.append({
-            "id": rel,
-            "type": node_type(f),
-            "language": "python",
-            "size": loc,
-            "loc": loc,
-            "group": dir_group(f, root, group_map),
-            "imports": len(imports_list),
-        })
+        nodes.append(
+            {
+                "id": rel,
+                "type": node_type(f),
+                "language": "python",
+                "size": loc,
+                "loc": loc,
+                "group": dir_group(f, root, group_map),
+                "imports": len(imports_list),
+            }
+        )
 
         for _kind, mod in imports_list:
             top_level = mod.split(".")[0]
@@ -150,7 +155,12 @@ def analyze(root: Path, group_map: dict):
                 key = (rel, top_level)
                 links_map[key] = links_map.get(key, 0) + 1
 
-    return nodes, list(external_nodes.values()), links_map, {
-        "total_files": len(py_files),
-        "total_loc": total_loc,
-    }
+    return (
+        nodes,
+        list(external_nodes.values()),
+        links_map,
+        {
+            "total_files": len(py_files),
+            "total_loc": total_loc,
+        },
+    )

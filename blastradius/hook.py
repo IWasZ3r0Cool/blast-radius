@@ -1,6 +1,7 @@
 """Install / uninstall a pre-commit hook that reports blast radius for staged files."""
+
 from __future__ import annotations
-import os
+
 import stat
 import sys
 from pathlib import Path
@@ -56,7 +57,9 @@ exit 0
 """
 
 
-def install(repo_path: str, threshold: int = 10, strict: bool = False, remove: bool = False) -> None:
+def install(
+    repo_path: str, threshold: int = 10, strict: bool = False, remove: bool = False
+) -> None:
     root = Path(repo_path).resolve()
     git_dir = root / ".git"
     if not git_dir.exists():
@@ -72,7 +75,9 @@ def install(repo_path: str, threshold: int = 10, strict: bool = False, remove: b
                 hook_path.unlink()
                 print(f"Removed blastradius pre-commit hook from {hook_path}")
             else:
-                print("Pre-commit hook exists but was not installed by blastradius — not removing.")
+                print(
+                    "Pre-commit hook exists but was not installed by blastradius — not removing."
+                )
         else:
             print("No pre-commit hook found.")
         return
@@ -95,7 +100,9 @@ def install(repo_path: str, threshold: int = 10, strict: bool = False, remove: b
 
     hook_path.parent.mkdir(exist_ok=True)
     hook_path.write_text(script)
-    hook_path.chmod(hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    hook_path.chmod(
+        hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    )
 
     mode = "strict (blocks commit)" if strict else "warn-only"
     print(

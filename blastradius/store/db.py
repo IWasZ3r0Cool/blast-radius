@@ -5,11 +5,12 @@
 Dependency rule: this module must not import from blastradius.graph or
 blastradius.semantic. The dependency arrow points only upward into this layer.
 """
+
 from __future__ import annotations
 
 import re
-import struct
 import sqlite3
+import struct
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ SCHEMA_VERSION = "3"
 # sqlite-vec is an optional C extension; absence is a graceful degradation, not an error.
 try:
     import sqlite_vec as _sqlite_vec
+
     _HAS_SQLITE_VEC = True
 except ImportError:
     _sqlite_vec = None  # type: ignore[assignment]
@@ -159,7 +161,7 @@ class Store:
                 self._conn.executescript("DROP TABLE IF EXISTS symbols_fts;")
                 self._conn.executescript(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5("
-                    "name, doc, signature, tokenize=\"porter unicode61\");"
+                    'name, doc, signature, tokenize="porter unicode61");'
                 )
                 self._conn.execute(
                     "INSERT INTO symbols_fts(rowid, name, doc, signature)"
@@ -184,7 +186,7 @@ class Store:
             self._conn.enable_load_extension(False)
             self._vec_dims = int(dims_str)
             self._has_vec = True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[blastradius] sqlite-vec load failed: {exc}", file=sys.stderr)
             self._has_vec = False
 
@@ -224,7 +226,9 @@ class Store:
         for node in data["nodes"]:
             path = node["id"]
             imports = node.get("imports", [])
-            imports_count = len(imports) if isinstance(imports, list) else int(imports or 0)
+            imports_count = (
+                len(imports) if isinstance(imports, list) else int(imports or 0)
+            )
 
             row = self._conn.execute(
                 "SELECT id FROM files WHERE path = ?", (path,)
@@ -551,7 +555,9 @@ class Store:
         obtained via `git log --format=%H <ref>`.
         Returns None if no temporal data is available.
         """
-        from blastradius.impact import compute_blast_radius  # avoid circular at module level
+        from blastradius.impact import (
+            compute_blast_radius,  # avoid circular at module level
+        )
 
         self._populate_reachable_temp(reachable)
 
@@ -572,7 +578,7 @@ class Store:
             return None
 
         nodes = [{"id": r[1]} for r in file_rows]
-        file_id_set = {r[0] for r in file_rows}
+        {r[0] for r in file_rows}
 
         # Edges active at this historical point
         edge_rows = self._conn.execute("""
@@ -621,7 +627,8 @@ class Store:
         _source_types = "('module','component','hook','store','route','config')"
 
         added_files = [
-            r[0] for r in self._conn.execute(f"""
+            r[0]
+            for r in self._conn.execute(f"""
                 SELECT path FROM files
                 WHERE active = 1
                 AND first_seen_commit IS NOT NULL
@@ -631,7 +638,8 @@ class Store:
         ]
 
         removed_files = [
-            r[0] for r in self._conn.execute(f"""
+            r[0]
+            for r in self._conn.execute(f"""
                 SELECT path FROM files
                 WHERE active = 0
                 AND last_seen_commit IS NOT NULL
@@ -671,9 +679,9 @@ class Store:
         ]
 
         result: dict = {
-            "added_files":   added_files,
+            "added_files": added_files,
             "removed_files": removed_files,
-            "added_edges":   added_edges,
+            "added_edges": added_edges,
             "removed_edges": removed_edges,
         }
         if warning:
@@ -710,7 +718,7 @@ class Store:
             self.set_meta("embedding_dims", str(dims))
             self._conn.commit()
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[blastradius] sqlite-vec init failed: {exc}", file=sys.stderr)
             self._has_vec = False
             return False
@@ -756,7 +764,7 @@ class Store:
             return []
         # Strip characters that are FTS5 syntax (", *, ^, -, (, ))
         # so raw user queries don't cause OperationalError.
-        safe = re.sub(r'["\*\^\-\(\)]', ' ', query).strip()
+        safe = re.sub(r'["\*\^\-\(\)]', " ", query).strip()
         if not safe:
             return []
         words = safe.split()
@@ -845,9 +853,7 @@ class Store:
         first, last, active = row[0], row[1], row[2]
         if first and first not in reachable:
             return False
-        if active == 0 and last and last not in reachable:
-            return False
-        return True
+        return not (active == 0 and last and last not in reachable)
 
     def get_symbol(self, symbol_id: int) -> dict | None:
         """Return symbol metadata dict or None if not found."""
@@ -862,14 +868,14 @@ class Store:
         if not row:
             return None
         return {
-            "id":          row["id"],
-            "name":        row["name"],
-            "kind":        row["kind"],
-            "line":        row["line"],
-            "exported":    bool(row["exported"]),
-            "signature":   row["signature"],
-            "doc":         row["doc"],
-            "file":        row["file"],
+            "id": row["id"],
+            "name": row["name"],
+            "kind": row["kind"],
+            "line": row["line"],
+            "exported": bool(row["exported"]),
+            "signature": row["signature"],
+            "doc": row["doc"],
+            "file": row["file"],
             "blast_score": row["blast_score"],
         }
 
@@ -885,14 +891,14 @@ class Store:
         ).fetchall()
         return [
             {
-                "id":          r["id"],
-                "name":        r["name"],
-                "kind":        r["kind"],
-                "line":        r["line"],
-                "exported":    bool(r["exported"]),
-                "signature":   r["signature"],
-                "doc":         r["doc"],
-                "file":        r["file"],
+                "id": r["id"],
+                "name": r["name"],
+                "kind": r["kind"],
+                "line": r["line"],
+                "exported": bool(r["exported"]),
+                "signature": r["signature"],
+                "doc": r["doc"],
+                "file": r["file"],
                 "blast_score": r["blast_score"],
             }
             for r in rows
@@ -909,8 +915,14 @@ class Store:
             (file_path,),
         ).fetchall()
         return [
-            {"id": r[0], "name": r[1], "kind": r[2], "line": r[3],
-             "signature": r[4], "doc": r[5]}
+            {
+                "id": r[0],
+                "name": r[1],
+                "kind": r[2],
+                "line": r[3],
+                "signature": r[4],
+                "doc": r[5],
+            }
             for r in rows
         ]
 
@@ -995,20 +1007,22 @@ class Store:
                 (fid,),
             ).fetchone()
             if row:
-                nodes.append({
-                    "file":                  row[0],
-                    "language":              row[1],
-                    "blast_score":           row[2],
-                    "direct_dependents":     row[3],
-                    "transitive_dependents": row[4],
-                    "hop":                   hop,
-                })
+                nodes.append(
+                    {
+                        "file": row[0],
+                        "language": row[1],
+                        "blast_score": row[2],
+                        "direct_dependents": row[3],
+                        "transitive_dependents": row[4],
+                        "hop": hop,
+                    }
+                )
 
         return {
-            "center":    file_path,
+            "center": file_path,
             "direction": direction,
-            "depth":     depth,
-            "nodes":     sorted(nodes, key=lambda x: (x["hop"], x["file"])),
+            "depth": depth,
+            "nodes": sorted(nodes, key=lambda x: (x["hop"], x["file"])),
         }
 
     # ── status ────────────────────────────────────────────────────────────────
@@ -1022,22 +1036,22 @@ class Store:
         except sqlite3.OperationalError:
             fts_rows = 0
         return {
-            "schema_version":      self.get_meta("schema_version") or "unknown",
+            "schema_version": self.get_meta("schema_version") or "unknown",
             "last_indexed_commit": self.get_meta("last_indexed_commit") or "none",
-            "repo_root":           self.get_meta("repo_root") or "unknown",
-            "active_files":        self._conn.execute(
+            "repo_root": self.get_meta("repo_root") or "unknown",
+            "active_files": self._conn.execute(
                 "SELECT COUNT(*) FROM files WHERE active=1"
             ).fetchone()[0],
-            "active_edges":        self._conn.execute(
+            "active_edges": self._conn.execute(
                 "SELECT COUNT(*) FROM edges WHERE active=1"
             ).fetchone()[0],
-            "active_symbols":      self._conn.execute(
+            "active_symbols": self._conn.execute(
                 "SELECT COUNT(*) FROM symbols WHERE active=1"
             ).fetchone()[0],
-            "fts_symbols":         fts_rows,
-            "embedding_model":     self.get_meta("embedding_model") or "none",
-            "embedding_dims":      self.get_meta("embedding_dims") or "none",
-            "vec_symbols":         "enabled" if self._has_vec else "disabled",
+            "fts_symbols": fts_rows,
+            "embedding_model": self.get_meta("embedding_model") or "none",
+            "embedding_dims": self.get_meta("embedding_dims") or "none",
+            "vec_symbols": "enabled" if self._has_vec else "disabled",
         }
 
     # ── close ─────────────────────────────────────────────────────────────────

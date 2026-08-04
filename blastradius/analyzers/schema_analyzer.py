@@ -8,14 +8,15 @@ Supports:
 Node type: "database"
 Links: foreign key / relation edges between tables
 """
+
 import re
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir, dir_group
+from .base import is_ignored, is_skip_dir, load_gitignore_patterns
 
 # ── SQL regexes ───────────────────────────────────────────────────────────────
 _SQL_TABLE_RE = re.compile(
-    r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?'
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
     r'(?:`[^`]+`|"[^"]+"|\'[^\']+\'|\[[\w\s]+\]|(\w+))',
     re.IGNORECASE,
 )
@@ -30,9 +31,9 @@ _SQL_FK_RE = re.compile(
 )
 
 # ── Prisma regexes ────────────────────────────────────────────────────────────
-_PRISMA_MODEL_RE    = re.compile(r'\bmodel\s+(\w+)\s*\{([^}]+)\}', re.DOTALL)
-_PRISMA_FIELD_RE    = re.compile(r'^\s+(\w+)\s+(\w+)', re.MULTILINE)
-_PRISMA_RELATION_RE = re.compile(r'@relation\s*\(', re.IGNORECASE)
+_PRISMA_MODEL_RE = re.compile(r"\bmodel\s+(\w+)\s*\{([^}]+)\}", re.DOTALL)
+_PRISMA_FIELD_RE = re.compile(r"^\s+(\w+)\s+(\w+)", re.MULTILINE)
+_PRISMA_RELATION_RE = re.compile(r"@relation\s*\(", re.IGNORECASE)
 
 
 def collect_sql_files(root: Path, patterns: list):
@@ -53,8 +54,8 @@ def collect_prisma_files(root: Path, patterns: list):
 
 def parse_sql_tables(source: str):
     """Return {table_name: [referenced_table_names]} from a SQL source."""
-    tables     = {}
-    current    = None
+    tables = {}
+    current = None
 
     for m in _SQL_TABLE_RE2.finditer(source):
         current = m.group(1).lower()
@@ -79,16 +80,26 @@ def parse_prisma_models(source: str):
     """Return {model_name: [related_model_names]} from a Prisma schema source."""
     models = {}
     for match in _PRISMA_MODEL_RE.finditer(source):
-        name   = match.group(1)
-        body   = match.group(2)
+        name = match.group(1)
+        body = match.group(2)
         models[name] = []
 
         # Find fields that reference other models (relation fields)
         for field_m in _PRISMA_FIELD_RE.finditer(body):
             field_type = field_m.group(2).rstrip("?[]")
             # If the field type is another model (capitalized, not a scalar)
-            scalars = {"String","Int","Float","Boolean","DateTime","Json",
-                       "Bytes","Decimal","BigInt","Unsupported"}
+            scalars = {
+                "String",
+                "Int",
+                "Float",
+                "Boolean",
+                "DateTime",
+                "Json",
+                "Bytes",
+                "Decimal",
+                "BigInt",
+                "Unsupported",
+            }
             if field_type not in scalars and field_type[0].isupper():
                 models[name].append(field_type)
 
@@ -96,16 +107,16 @@ def parse_prisma_models(source: str):
 
 
 def analyze(root: Path, group_map: dict):
-    patterns     = load_gitignore_patterns(root)
-    sql_files    = collect_sql_files(root, patterns)
+    patterns = load_gitignore_patterns(root)
+    sql_files = collect_sql_files(root, patterns)
     prisma_files = collect_prisma_files(root, patterns)
 
     if not sql_files and not prisma_files:
         return [], [], {}, {"total_files": 0, "total_loc": 0}
 
-    all_nodes   = []
-    links_map   = {}
-    total_loc   = 0
+    all_nodes = []
+    links_map = {}
+    total_loc = 0
     total_files = 0
 
     # ── SQL ───────────────────────────────────────────────────────────────────
@@ -116,7 +127,7 @@ def analyze(root: Path, group_map: dict):
         except OSError:
             continue
 
-        total_loc   += source.count("\n") + 1
+        total_loc += source.count("\n") + 1
         total_files += 1
 
         tables = parse_sql_tables(source)
@@ -133,18 +144,20 @@ def analyze(root: Path, group_map: dict):
 
         for tbl_name, refs in tables.items():
             node_id = f"{prefix}{tbl_name}"
-            all_nodes.append({
-                "id":       node_id,
-                "type":     "database",
-                "language": "sql",
-                "size":     55,
-                "loc":      0,
-                "group":    grp,
-                "imports":  len(refs),
-            })
+            all_nodes.append(
+                {
+                    "id": node_id,
+                    "type": "database",
+                    "language": "sql",
+                    "size": 55,
+                    "loc": 0,
+                    "group": grp,
+                    "imports": len(refs),
+                }
+            )
             for ref in refs:
                 ref_id = f"{prefix}{ref}"
-                key    = (node_id, ref_id)
+                key = (node_id, ref_id)
                 links_map[key] = links_map.get(key, 0) + 1
 
     # ── Prisma ────────────────────────────────────────────────────────────────
@@ -155,7 +168,7 @@ def analyze(root: Path, group_map: dict):
         except OSError:
             continue
 
-        total_loc   += source.count("\n") + 1
+        total_loc += source.count("\n") + 1
         total_files += 1
 
         models = parse_prisma_models(source)
@@ -171,26 +184,33 @@ def analyze(root: Path, group_map: dict):
 
         for model_name, relations in models.items():
             node_id = f"{prefix}{model_name}"
-            all_nodes.append({
-                "id":       node_id,
-                "type":     "database",
-                "language": "prisma",
-                "size":     55,
-                "loc":      0,
-                "group":    grp,
-                "imports":  len(set(relations)),
-            })
+            all_nodes.append(
+                {
+                    "id": node_id,
+                    "type": "database",
+                    "language": "prisma",
+                    "size": 55,
+                    "loc": 0,
+                    "group": grp,
+                    "imports": len(set(relations)),
+                }
+            )
             seen_rels = set()
             for rel_model in relations:
                 rel_id = f"{prefix}{rel_model}"
-                key    = (node_id, rel_id)
+                key = (node_id, rel_id)
                 # Avoid duplicate bidirectional edges
                 reverse = (rel_id, node_id)
                 if key not in seen_rels and reverse not in links_map:
                     seen_rels.add(key)
                     links_map[key] = 1
 
-    return all_nodes, [], links_map, {
-        "total_files": total_files,
-        "total_loc":   total_loc,
-    }
+    return (
+        all_nodes,
+        [],
+        links_map,
+        {
+            "total_files": total_files,
+            "total_loc": total_loc,
+        },
+    )

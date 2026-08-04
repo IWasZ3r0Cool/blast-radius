@@ -1,14 +1,15 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
 """Hybrid query engine: semantic KNN + FTS5 keyword + graph expansion, fused with RRF."""
+
 from __future__ import annotations
 
 import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from blastradius.store.db import Store
     from blastradius.semantic.provider import EmbeddingProvider
+    from blastradius.store.db import Store
 
 _RRF_K = 60  # standard RRF constant
 
@@ -17,7 +18,9 @@ import re as _re
 
 def _query_stems(query: str) -> list[str]:
     """Return lowercase 4-char stems of each word in the query."""
-    return [w[:4].lower() for w in _re.sub(r"[^\w\s]", " ", query).split() if len(w) >= 3]
+    return [
+        w[:4].lower() for w in _re.sub(r"[^\w\s]", " ", query).split() if len(w) >= 3
+    ]
 
 
 def _path_boost(file_path: str, stems: list[str]) -> float:
@@ -66,7 +69,7 @@ def hybrid_search(
                 _note(sid, "semantic")
             if sem_ids:
                 ranked_lists.append(sem_ids)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"[blastradius] semantic search skipped: {exc}", file=sys.stderr)
     elif provider is not None and not store._has_vec:
         print(
@@ -81,7 +84,7 @@ def hybrid_search(
             _note(sid, "fts")
         if fts_ids:
             ranked_lists.append(fts_ids)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"[blastradius] FTS search skipped: {exc}", file=sys.stderr)
 
     # 3. Graph expansion: supplement when primary signals are sparse.
@@ -123,7 +126,7 @@ def hybrid_search(
     # contains query stems (auth.ts ranks above feedback/route.ts for "authentication").
     stems = _query_stems(query)
     hydrated: list[tuple[float, dict]] = []
-    for sid, score in fused[:k * 3]:  # oversample so rerank can promote better hits
+    for sid, score in fused[: k * 3]:  # oversample so rerank can promote better hits
         sym = store.get_symbol(sid)
         if sym is None:
             continue

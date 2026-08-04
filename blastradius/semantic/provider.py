@@ -5,6 +5,7 @@
 Dependency rule: this module must not import from blastradius.store, blastradius.graph,
 or any other blastradius layer.  It is a pure provider abstraction.
 """
+
 from __future__ import annotations
 
 import json

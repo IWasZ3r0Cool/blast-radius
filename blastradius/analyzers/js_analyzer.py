@@ -1,37 +1,78 @@
 """JavaScript / TypeScript / Vue repository analyzer (regex-based)."""
+
 import json
 import re
 from pathlib import Path
 
-from .base import load_gitignore_patterns, is_ignored, is_skip_dir, dir_group
+from .base import dir_group, is_ignored, is_skip_dir, load_gitignore_patterns
 
 JS_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue"}
 
 CONFIG_STEMS = {
-    "config", "settings", "constants", "env", "configuration", "conf",
-    "vite.config", "webpack.config", "babel.config", "jest.config",
-    "vitest.config", "tailwind.config", "next.config", "nuxt.config",
-    "svelte.config", "astro.config", "rollup.config", "esbuild.config",
+    "config",
+    "settings",
+    "constants",
+    "env",
+    "configuration",
+    "conf",
+    "vite.config",
+    "webpack.config",
+    "babel.config",
+    "jest.config",
+    "vitest.config",
+    "tailwind.config",
+    "next.config",
+    "nuxt.config",
+    "svelte.config",
+    "astro.config",
+    "rollup.config",
+    "esbuild.config",
 }
 
 # Path-based heuristics
 _ROUTE_DIRS = {"pages", "routes", "views", "screens"}
-_NEXT_APP_FILES = {"page", "layout", "loading", "error", "not-found", "template", "route"}
-_STORE_DIRS = {"store", "stores", "state", "redux", "slices", "atoms", "contexts", "context"}
-_STORE_STEMS = {"store", "slice", "reducer", "context", "atom", "provider", "actions", "mutations"}
+_NEXT_APP_FILES = {
+    "page",
+    "layout",
+    "loading",
+    "error",
+    "not-found",
+    "template",
+    "route",
+}
+_STORE_DIRS = {
+    "store",
+    "stores",
+    "state",
+    "redux",
+    "slices",
+    "atoms",
+    "contexts",
+    "context",
+}
+_STORE_STEMS = {
+    "store",
+    "slice",
+    "reducer",
+    "context",
+    "atom",
+    "provider",
+    "actions",
+    "mutations",
+}
 
 # Frameworks detected by package.json dependency names
 FRAMEWORK_SIGNALS = [
-    ("next",           "next"),
-    ("nuxt",           "nuxt"),
-    ("@sveltejs/kit",  "sveltekit"),
-    ("svelte",         "svelte"),
-    ("@angular/core",  "angular"),
-    ("gatsby",         "gatsby"),
-    ("remix",          "remix"),
-    ("astro",          "astro"),
-    ("react",          "react"),
-    ("vue",            "vue"),
+    ("next", "next"),
+    ("nuxt", "nuxt"),
+    ("@sveltejs/kit", "sveltekit"),
+    ("svelte", "svelte"),
+    ("@angular/core", "angular"),
+    ("gatsby", "gatsby"),
+    ("remix", "remix"),
+    ("astro", "astro"),
+    ("react", "react"),
+    ("vue", "vue"),
 ]
 
 # ── Import extraction regexes ─────────────────────────────────────────────────
@@ -47,22 +88,24 @@ _DYN_IMPORT_RE = re.compile(r"""(?<!\w)import\s*\(\s*['"]([^'"]+)['"]\s*\)""")
 
 # ── Component / hook / store detection regexes ────────────────────────────────
 # JSX return: return ( <... or return <...
-_JSX_RETURN_RE = re.compile(r'return\s*\(?[\s\n]*<[A-Za-z/]', re.MULTILINE)
+_JSX_RETURN_RE = re.compile(r"return\s*\(?[\s\n]*<[A-Za-z/]", re.MULTILINE)
 # PascalCase JSX element usage (strong signal of component file).
 # Negative lookbehind (?<!\w) excludes TypeScript generics like Promise<Response>.
-_JSX_PASCAL_RE = re.compile(r'(?<!\w)<[A-Z][A-Za-z]+[\s/>]')
+_JSX_PASCAL_RE = re.compile(r"(?<!\w)<[A-Z][A-Za-z]+[\s/>]")
 # export function/const useXxx or export default function useXxx
-_HOOK_EXPORT_RE = re.compile(r'export\s+(?:default\s+)?(?:const|function)\s+use[A-Z]')
+_HOOK_EXPORT_RE = re.compile(r"export\s+(?:default\s+)?(?:const|function)\s+use[A-Z]")
 # Context API
-_CONTEXT_RE = re.compile(r'createContext\s*[(<]')
+_CONTEXT_RE = re.compile(r"createContext\s*[(<]")
 # State management: Redux, Zustand, Jotai, Svelte stores
 _STORE_RE = re.compile(
-    r'createSlice\s*\(|createStore\s*\(|atom\s*\(|writable\s*\('
+    r"createSlice\s*\(|createStore\s*\(|atom\s*\(|writable\s*\("
     r"|readable\s*\(|create\s*\(\s*\((?:set|get)\)"
 )
 
 # ── Vue SFC extraction ────────────────────────────────────────────────────────
-_VUE_SCRIPT_RE = re.compile(r'<script(?:\s[^>]*)?>(.+?)</script>', re.DOTALL | re.IGNORECASE)
+_VUE_SCRIPT_RE = re.compile(
+    r"<script(?:\s[^>]*)?>(.+?)</script>", re.DOTALL | re.IGNORECASE
+)
 
 
 def collect_files(root: Path, patterns: list):
@@ -194,16 +237,19 @@ def _load_path_aliases(root: Path) -> "dict[str, list[str]]":
             continue
         try:
             import json as _json
+
             data = _json.loads(cfg.read_text(errors="replace"))
             paths = data.get("compilerOptions", {}).get("paths", {})
             if paths:
                 return paths
-        except Exception:
+        except (json.JSONDecodeError, KeyError, AttributeError, TypeError, OSError):
             continue
     return {}
 
 
-def _resolve_alias(mod: str, aliases: "dict[str, list[str]]", root: Path, all_files: set):
+def _resolve_alias(
+    mod: str, aliases: "dict[str, list[str]]", root: Path, all_files: set
+):
     """Try to resolve a bare module specifier via tsconfig path aliases."""
     all_extensions = list(JS_EXTENSIONS) + [".css", ".scss", ".sass", ".less"]
     for pattern, targets in aliases.items():
@@ -212,7 +258,7 @@ def _resolve_alias(mod: str, aliases: "dict[str, list[str]]", root: Path, all_fi
             prefix = pattern[:-2]  # e.g. "@"
             if not mod.startswith(prefix + "/"):
                 continue
-            suffix = mod[len(prefix) + 1:]  # e.g. "lib/db/schema"
+            suffix = mod[len(prefix) + 1 :]  # e.g. "lib/db/schema"
             for target in targets:
                 if target.endswith("/*"):
                     base = target[:-2].lstrip("./")  # e.g. "src"
@@ -228,7 +274,13 @@ def _resolve_alias(mod: str, aliases: "dict[str, list[str]]", root: Path, all_fi
                 if candidate_stem in all_files:
                     return candidate_stem
                 # Try as directory index
-                for idx in ("index.ts", "index.tsx", "index.js", "index.jsx", "index.vue"):
+                for idx in (
+                    "index.ts",
+                    "index.tsx",
+                    "index.js",
+                    "index.jsx",
+                    "index.vue",
+                ):
                     candidate = candidate_stem + "/" + idx
                     if candidate in all_files:
                         return candidate
@@ -245,10 +297,11 @@ def _resolve_alias(mod: str, aliases: "dict[str, list[str]]", root: Path, all_fi
     return None
 
 
-def resolve_internal(mod: str, file_path: Path, root: Path, all_files: set,
-                     aliases=None):
+def resolve_internal(
+    mod: str, file_path: Path, root: Path, all_files: set, aliases=None
+):
     """Resolve a relative/absolute module path to a repo-relative file path."""
-    if not (mod.startswith(".") or mod.startswith("/")):
+    if not (mod.startswith((".", "/"))):
         # Try path aliases before giving up (e.g. "@/lib/auth", "~/utils")
         if aliases:
             resolved = _resolve_alias(mod, aliases, root, all_files)
@@ -334,18 +387,24 @@ def analyze(root: Path, group_map: dict):
         ntype = node_type(f, source)
 
         # For Vue SFCs, extract imports from the script block only
-        mods = extract_vue_imports(source) if f.suffix == ".vue" else extract_imports(source)
+        mods = (
+            extract_vue_imports(source)
+            if f.suffix == ".vue"
+            else extract_imports(source)
+        )
 
-        nodes.append({
-            "id": rel,
-            "type": ntype,
-            "language": lang,
-            "framework": framework,
-            "size": loc,
-            "loc": loc,
-            "group": dir_group(f, root, group_map),
-            "imports": len(mods),
-        })
+        nodes.append(
+            {
+                "id": rel,
+                "type": ntype,
+                "language": lang,
+                "framework": framework,
+                "size": loc,
+                "loc": loc,
+                "group": dir_group(f, root, group_map),
+                "imports": len(mods),
+            }
+        )
 
         for mod in mods:
             internal = resolve_internal(mod, f, root, all_rel, aliases)

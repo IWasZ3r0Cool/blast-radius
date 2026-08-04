@@ -1,35 +1,37 @@
 """Symbol index builder: standalone symbolindex.json, --inline, and --claude-md modes."""
+
 from __future__ import annotations
+
 import json
 import sys
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
-from blastradius.analyzers.base import load_gitignore_patterns, is_ignored, is_skip_dir
+from blastradius.analyzers.base import is_ignored, is_skip_dir, load_gitignore_patterns
 from blastradius.symbol_extractor import EXTRACTORS, extract_symbols
 
 SYMBOL_INDEX_FILENAME = "symbolindex.json"
 
 _CLAUDE_START = "<!-- blastradius-symbols-start -->"
-_CLAUDE_END   = "<!-- blastradius-symbols-end -->"
+_CLAUDE_END = "<!-- blastradius-symbols-end -->"
 
 _SUPPORTED_EXTS = frozenset(EXTRACTORS.keys())
 
 _KIND_ABBR = {
-    "function":  "fn",
-    "class":     "cls",
-    "struct":    "st",
-    "enum":      "en",
-    "trait":     "tr",
+    "function": "fn",
+    "class": "cls",
+    "struct": "st",
+    "enum": "en",
+    "trait": "tr",
     "interface": "if",
-    "type":      "ty",
-    "const":     "co",
-    "module":    "mod",
-    "resource":  "res",
-    "data":      "dat",
-    "variable":  "var",
-    "output":    "out",
-    "provider":  "prv",
+    "type": "ty",
+    "const": "co",
+    "module": "mod",
+    "resource": "res",
+    "data": "dat",
+    "variable": "var",
+    "output": "out",
+    "provider": "prv",
 }
 
 
@@ -70,7 +72,7 @@ def build_symbol_index(repo_path: str) -> dict:
 
     return {
         "meta": {
-            "generated": str(date.today()),
+            "generated": str(datetime.now(timezone.utc).date()),
             "repo": root.name + "/",
             "total_symbols": total,
         },
@@ -104,8 +106,9 @@ def write_inline(symbol_data: dict, index_path: Path) -> None:
         else:
             # Go nodes are package directories — aggregate from all files in dir
             pkg_syms = [
-                sym for rel, syms in by_file.items()
-                if (rel.startswith(nid + "/") or rel.startswith(nid + "\\"))
+                sym
+                for rel, syms in by_file.items()
+                if (rel.startswith((nid + "/", nid + "\\")))
                 for sym in syms
             ]
             if pkg_syms:
@@ -127,7 +130,7 @@ def _fmt_sym(sym: dict, exported_only: bool) -> str | None:
     methods = sym.get("methods")
     if methods:
         shown = methods[:6]
-        suffix = f"+{len(methods)-6}" if len(methods) > 6 else ""
+        suffix = f"+{len(methods) - 6}" if len(methods) > 6 else ""
         base += "[" + ",".join(shown) + suffix + "]"
     return base
 
@@ -159,16 +162,16 @@ def write_claude_md(
     if claude_md_path.exists():
         existing = claude_md_path.read_text()
         start = existing.find(_CLAUDE_START)
-        end   = existing.find(_CLAUDE_END)
+        end = existing.find(_CLAUDE_END)
         if start != -1 and end != -1:
-            new_text = existing[:start] + section + existing[end + len(_CLAUDE_END):]
+            new_text = existing[:start] + section + existing[end + len(_CLAUDE_END) :]
         else:
             new_text = existing.rstrip() + "\n\n" + section + "\n"
     else:
         new_text = section + "\n"
 
     claude_md_path.write_text(new_text)
-    sym_count  = symbol_data["meta"]["total_symbols"]
+    sym_count = symbol_data["meta"]["total_symbols"]
     file_count = len(symbol_data["file_symbols"])
     print(
         f"CLAUDE.md: {sym_count} symbols / {file_count} files → {claude_md_path}",

@@ -2,24 +2,35 @@
 
 ## Developer Commands & Verification
 
-- **Run tests**: `uv run pytest` (set `$env:PYTHONPATH="."` if running outside an installed venv).
-- **Run single test**: `uv run pytest tests/test_phase1.py` or `uv run pytest -k <test_name>`.
-- **Run CLI in dev**: `uv run python -m blastradius.cli <command>` or `uv run blastradius <command>`.
-- **Environment note**: Avoid system `pip` or system `python` if broken; prefer `uv run` or `.venv\Scripts\` execution.
+- **Run unit tests**: `uv run pytest` (or single test: `uv run pytest tests/test_phase1.py` / `uv run pytest -k <name>`).
+- **Run CLI integration benchmark**: `uv run python benchmark/test_cli.py` (auto-builds indexes if missing).
+- **Run MCP integration benchmark**: `uv run python benchmark/test_mcp.py`.
+- **Test local package build**: `uv build` (generates sdist & wheel in `dist/`).
+- **Run CLI in dev**: `uv run blastradius <command>` or `uv run python -m blastradius.cli <command>`.
+- **Environment note**: Prefer `uv run` or `.venv\Scripts\` execution over system python/pip.
 
-## Core Architecture & Package Structure
+## Core Architecture & Package Names
 
-- **Package name**: `blastradius` (source in `blastradius/`). Entry point: `blastradius.cli:main`.
+- **PyPI Package Name**: `blastradius-cli` (installed via `pip install blastradius-cli`).
+- **Python Import Package**: `blastradius` (source in `blastradius/`).
+- **CLI Executable Command**: `blastradius` (entry point `blastradius.cli:main`).
 - **Index artifacts**: Default dependency graph is written to `blastradius.json`; SQLite store is populated at `<repo>/.blastradius/index.db`.
 - **Layering rule**: `blastradius.store`, `blastradius.temporal`, and core modules must **never** import from `blastradius.semantic` or `blastradius.analyzers`.
 - **Backward compatibility**: The `blastradius.json` file export schema is frozen. SQLite DB synchronization is an additive side-effect of `index.build()`.
 
-## Storage & Database Gotchas (`blastradius/store/db.py`)
+## PyPI Release & CI Publishing (`.github/workflows/publish.yml`)
 
-- **FTS5 table**: Must remain a standalone table without the `content=` option. Using `content='symbols'` triggers `database disk image is malformed` errors during deletes in WAL mode.
+- **Publishing flow**: Automated via GitHub Actions using PyPI Trusted Publisher (OIDC).
+- **Trigger**: Creating a GitHub Release or pushing a version tag (e.g. `git tag v0.3.7 && git push origin v0.3.7`).
+- **PyPI Match constraint**: PyPI Pending/Trusted Publisher project name on PyPI.org must match `name = "blastradius-cli"` in `pyproject.toml`.
+
+## Storage, Encoding & Database Gotchas (`blastradius/store/db.py`)
+
+- **FTS5 table**: Must remain a standalone table without the `content=` option to prevent malformed disk image errors in WAL mode.
 - **Soft deletes**: `sync()` must set `last_seen_commit` on soft-delete for temporal `--as-of` queries to filter correctly.
 - **SQLite transactions**: `executescript()` auto-commits pending transactions in Python `sqlite3`. Keep regular DDL and FTS DDL in separate `executescript()` calls.
 - **`sqlite-vec` optional dependency**: Never import `sqlite_vec` at module top-level. Wrap imports in `try...except` for runtime feature detection and graceful fallback to FTS5 + graph search.
+- **Windows CLI Encoding**: Reconfigure `sys.stdout` and `sys.stderr` to `utf-8` on CLI entrypoints (`cli.py`, `test_cli.py`, `test_mcp.py`) to prevent Windows `cp1252` `UnicodeEncodeError`.
 
 ## Temporal Layer (`blastradius/temporal/history.py`)
 

@@ -11,6 +11,7 @@ Supported configs:
   - turbo.json            (Turborepo)
   - poetry workspaces (pyproject.toml with [tool.poetry] packages)
 """
+
 import json
 import re
 from pathlib import Path
@@ -20,12 +21,13 @@ def _read_yaml_list(path: Path, key: str):
     """Return list value for 'key' from a simple YAML file (strings only)."""
     try:
         import yaml  # type: ignore
+
         data = yaml.safe_load(path.read_text(errors="replace"))
         if isinstance(data, dict):
             val = data.get(key, [])
             if isinstance(val, list):
                 return [str(v) for v in val]
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     # Regex fallback — works for simple string lists
     try:
@@ -42,10 +44,14 @@ def _read_yaml_list(path: Path, key: str):
                 m = re.match(r"^\s*-\s*['\"]?([^'\"#\n]+?)['\"]?\s*$", line)
                 if m:
                     results.append(m.group(1).strip())
-                elif stripped and not stripped.startswith("-") and not stripped.startswith("#"):
+                elif (
+                    stripped
+                    and not stripped.startswith("-")
+                    and not stripped.startswith("#")
+                ):
                     in_block = False
         return results
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
 
 
@@ -68,7 +74,7 @@ def _glob_to_packages(root: Path, globs: list):
                             try:
                                 data = json.loads(pkg_json.read_text(errors="replace"))
                                 name = data.get("name", child.name)
-                            except Exception:
+                            except Exception:  # noqa: BLE001, S110
                                 pass
                         packages[str(child.relative_to(root))] = name
         else:
@@ -80,7 +86,7 @@ def _glob_to_packages(root: Path, globs: list):
                     try:
                         data = json.loads(pkg_json.read_text(errors="replace"))
                         name = data.get("name", candidate.name)
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S110
                         pass
                 packages[str(candidate.relative_to(root))] = name
     return packages
@@ -105,11 +111,11 @@ def detect_workspaces(root: Path):
         try:
             data = json.loads(pkg_json.read_text(errors="replace"))
             ws = data.get("workspaces", [])
-            if isinstance(ws, dict):   # yarn berry: {"packages": [...]}
+            if isinstance(ws, dict):  # yarn berry: {"packages": [...]}
                 ws = ws.get("packages", [])
             if ws:
                 packages.update(_glob_to_packages(root, ws))
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     # lerna.json
@@ -119,7 +125,7 @@ def detect_workspaces(root: Path):
             data = json.loads(lerna.read_text(errors="replace"))
             ws = data.get("packages", ["packages/*"])
             packages.update(_glob_to_packages(root, ws))
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     # nx.json — just signals this is an Nx monorepo; packages typically in

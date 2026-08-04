@@ -1,12 +1,26 @@
 """Shared utilities for all language analyzers."""
+
 import re
 from pathlib import Path
 
 # Directories to skip during file collection
 SKIP_DIRS = {
-    "__pycache__", "node_modules", ".venv", "venv", "env",
-    ".git", "dist", "build", ".next", "out", "coverage",
-    ".turbo", ".cache", "target", "vendor", ".expo",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    ".git",
+    "dist",
+    "build",
+    ".next",
+    "out",
+    "coverage",
+    ".turbo",
+    ".cache",
+    "target",
+    "vendor",
+    ".expo",
 }
 
 
