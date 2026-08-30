@@ -244,13 +244,13 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     if args.mcp:
         from blastradius.mcp_server import serve
 
-        serve()
+        serve(repo_path=args.repo)
     else:
         from blastradius.viz_server import serve
 
         output = Path(args.output) if getattr(args, "output", None) else None
         serve(
-            repo_path=args.repo,
+            repo_path=args.repo or ".",
             port=args.port,
             watch=args.watch,
             output=output,
@@ -322,16 +322,16 @@ def _cmd_lookup(args: argparse.Namespace) -> None:
     # Fall back to symbolindex.json when DB not available
     if not matches and not args.index:
         try:
-            from blastradius.mcp_server import _resolve_symbol_index
+            from blastradius.artifacts import resolve_symbol_index
 
-            sym_data = _resolve_symbol_index(None)
+            sym_data = resolve_symbol_index(None)
             matches = sym_data.get("symbols", {}).get(name, [])
         except FileNotFoundError:
             pass
     elif not matches and args.index:
-        from blastradius.mcp_server import _resolve_symbol_index
+        from blastradius.artifacts import resolve_symbol_index
 
-        sym_data = _resolve_symbol_index(args.index)
+        sym_data = resolve_symbol_index(args.index)
         matches = sym_data.get("symbols", {}).get(name, [])
 
     if not matches:
@@ -866,7 +866,9 @@ def _build_parser() -> argparse.ArgumentParser:
     serve_mode.add_argument(
         "--mcp", action="store_true", help="Run as MCP stdio server"
     )
-    p_serve.add_argument("--repo", default=".", help="Repo to analyze (viz mode)")
+    p_serve.add_argument(
+        "--repo", help="Repository to visualize or use as the MCP default"
+    )
     p_serve.add_argument("--port", type=int, default=8080, help="Port for viz server")
     p_serve.add_argument(
         "--watch", action="store_true", help="Watch for file changes (viz mode)"

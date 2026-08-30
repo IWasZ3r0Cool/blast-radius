@@ -17,7 +17,8 @@ Point it at any project — Python, JavaScript/TypeScript, Go, Ruby, Rust, Java,
 - Ten ways to consume the data: CLI, markdown report, MCP server (10 tools), pre-commit hook, CLAUDE.md injection
 - An interactive visualization UI (2D/3D graphs, dependency matrix, treemap)
 
-No build step. No npm. Zero required runtime dependencies — SQLite is stdlib.
+No project build step or npm required. SQLite is stdlib; the default installation
+includes the official Python MCP SDK and its runtime dependencies.
 
 ---
 
@@ -34,6 +35,7 @@ blastradius --help
 The package is **`blastradius-cli`**; the executable is **`blastradius`**. This
 repository maintains and publishes the PyPI package. You do not need to activate
 a virtual environment or add blastradius to the project you want to analyze.
+Python 3.10+ is required. MCP is included by default; no MCP extra is needed.
 See uv's [tool guide](https://docs.astral.sh/uv/guides/tools/) for details.
 
 If your shell cannot find `blastradius`, run `uv tool update-shell` and open a new
@@ -367,12 +369,59 @@ vec_symbols         : enabled
 
 ```bash
 blastradius serve --viz [--repo PATH] [--port PORT] [--watch]
-blastradius serve --mcp
+blastradius serve --mcp [--repo PATH]
 ```
 
 `--viz` starts a local HTTP server for the interactive visualization UI (5 modes: 2D force graph, 3D network, dependency matrix, treemap, infrastructure graph). Visit the printed URL in your browser; keep the terminal process running. The installed tool includes the HTML, so no source checkout is needed. Use `--port` if port 8080 is already occupied.
 
 `--mcp` starts a stdio MCP server that exposes blastradius tools directly to Claude and other MCP clients.
+
+For a project-specific server, use either launcher:
+
+```bash
+blastradius serve --mcp --repo /path/to/project
+uvx --from blastradius-cli blastradius serve --mcp --repo /path/to/project
+```
+
+The SDK supports modern MCP `2026-07-28` requests and legacy initialization with
+`2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25`. Modern clients use
+`server/discover` and per-request metadata; discovery lists modern revisions.
+Legacy clients continue to use `initialize` followed by `notifications/initialized`.
+See the [MCP compatibility specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning).
+
+`--repo` sets a fixed default repository; it does not analyze it automatically.
+Explicit `index_path`, `symbol_index_path`, and `db_path` arguments take precedence.
+Relative artifact and analysis paths are based on `--repo`, or on the startup
+working directory when omitted. Without `--repo`, indexes are discovered by
+walking up from that directory. With `--repo`, a missing index never falls back
+to a parent or unrelated repository. Analyzing another repository does not change
+this default. File queries prefer exact repo-relative or absolute paths; shortened
+paths must identify a unique file.
+
+For a graph exported outside its repository, keep the export selected with
+`index_path` and configure `--repo /path/to/project` when querying absolute source
+paths. `get_impact` and `get_dependencies` check exact node matches relative to
+the graph's directory and the configured repository. Without `--repo`, repository
+context comes from the nearest graph or database above the startup directory,
+or that directory itself if neither exists. Conflicting matches are reported as
+ambiguous. If no context matches, use a repo-relative file path or configure
+`--repo`; absolute paths are never guessed by suffix. The selected graph's data
+is never replaced, and its `meta.root` basename is not an absolute-location hint.
+
+Tool arguments are validated without string-to-number coercion. `semantic_search.k`
+must be a positive integer; `graph_query.depth` must be a nonnegative integer
+(`0` returns the starting node only). Malformed calls, invalid arguments, and
+unknown tools return protocol errors. Missing files/indexes and invalid Git refs
+return failed tool results with actionable messages; an unknown symbol is a
+successful lookup with `found: false`.
+
+MCP uses stdin/stdout, not a browser URL. Diagnostics go to stderr. If a client
+cannot connect, check the executable path, Python requirement, and client stderr.
+If a tool cannot find its index, run `blastradius analyze /path/to/project`
+(or `blastradius symbols /path/to/project` for a standalone symbol index) and
+check `--repo` or its explicit artifact argument. Closing stdin shuts down the
+server. Cancellation prevents queued work from starting and suppresses late
+responses; an already-running synchronous write finishes safely, without rollback.
 
 **MCP tools:**
 
@@ -396,7 +445,7 @@ blastradius serve --mcp
   "mcpServers": {
     "blastradius": {
       "command": "/absolute/path/to/blastradius",
-      "args": ["serve", "--mcp"]
+      "args": ["serve", "--mcp", "--repo", "/absolute/path/to/project"]
     }
   }
 }
@@ -566,7 +615,7 @@ for this repo, or `--scope user` for all your repos. These are the scopes in
 
 ```bash
 # Project-scoped (stored in .mcp.json)
-claude mcp add --scope project blastradius -- /path/to/blastradius serve --mcp
+claude mcp add --scope project blastradius -- /path/to/blastradius serve --mcp --repo /path/to/project
 
 # User-scoped (available in all your repos)
 claude mcp add --scope user blastradius -- /path/to/blastradius serve --mcp
@@ -586,8 +635,10 @@ claude mcp list
 
 > **Note:** A GUI or MCP client may have a different PATH from your terminal.
 > An absolute executable path avoids relying on its shell configuration. Do not
-> commit a machine-specific absolute path in shared `.mcp.json` without adapting
-> it for your team; user scope is convenient for a personal installation.
+> commit machine-specific executable or repository paths in shared `.mcp.json`
+> without adapting them for your team. A user-scoped server without `--repo`
+> relies on the client's launch directory; use explicit artifact paths when
+> querying a different repository, or configure a project-specific server.
 
 Claude now has all 10 MCP tools available in every session. When it needs to find `processPayment`, it calls `lookup_symbol("processPayment")` and gets `src/billing.py:142` back in one shot — no file scanning. When it needs to find code that validates auth tokens without knowing the exact name, it calls `semantic_search("validate auth token")`.
 
@@ -822,6 +873,9 @@ Kind abbreviations: `fn` function · `cls` class · `st` struct · `en` enum · 
 
 ## Optional dependencies
 
+The MCP SDK, AnyIO, and JSON Schema validation are required runtime dependencies
+installed automatically. The following features remain optional:
+
 | Package | Purpose | Install |
 |---------|---------|---------|
 | `sqlite-vec` | Semantic vector search in `blastradius search` and `semantic_search` MCP tool | `uv tool install --force 'blastradius-cli[semantic]'` |
@@ -871,7 +925,7 @@ Without these env vars, `blastradius search` and the `semantic_search` MCP tool 
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) for the recommended tool installation
-- Python 3.9+
+- Python 3.10+
 - A modern browser (for `--viz` mode)
 
 ---

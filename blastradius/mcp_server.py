@@ -1,23 +1,30 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
-"""Stdio MCP server — exposes blastradius tools to Claude and other MCP clients."""
-
 from __future__ import annotations
+
+"""Stdio MCP server — exposes blastradius tools to MCP clients."""
 
 import json
 import sys
+from importlib.metadata import version
 from pathlib import Path
 
+import anyio
+from jsonschema import Draft202012Validator
+from mcp import types
+from mcp.server.lowlevel import Server
+from mcp.server.stdio import stdio_server
+from mcp.shared.exceptions import MCPError
+from mcp.shared.message import SessionMessage
+
+from blastradius.artifacts import Artifacts, resolve_file_id
 from blastradius.impact import compute_blast_radius
 from blastradius.index import (
     INDEX_FILENAME,
     build,
-    find_db,
-    find_index,
     git_modified,
     git_reachable,
     git_resolve,
-    load,
 )
 from blastradius.reporter import format_markdown
 from blastradius.symbols import SYMBOL_INDEX_FILENAME
@@ -152,7 +159,8 @@ TOOLS = [
                 },
                 "k": {
                     "type": "integer",
-                    "description": "Maximum number of results to return. Default: 10.",
+                    "minimum": 1,
+                    "description": "Positive maximum number of results to return. Default: 10.",
                 },
                 "as_of": {
                     "type": "string",
@@ -160,7 +168,7 @@ TOOLS = [
                 },
                 "db_path": {
                     "type": "string",
-                    "description": "Path to .blastradius/index.db. Auto-discovered from cwd if omitted.",
+                    "description": "Path to .blastradius/index.db. Defaults to --repo or cwd discovery.",
                 },
             },
             "required": ["query"],
@@ -187,7 +195,7 @@ TOOLS = [
                 },
                 "db_path": {
                     "type": "string",
-                    "description": "Path to .blastradius/index.db. Auto-discovered from cwd if omitted.",
+                    "description": "Path to .blastradius/index.db. Defaults to --repo or cwd discovery.",
                 },
             },
             "required": ["file"],
@@ -214,11 +222,12 @@ TOOLS = [
                 },
                 "depth": {
                     "type": "integer",
-                    "description": "Number of hops to traverse. Default: 2.",
+                    "minimum": 0,
+                    "description": "Nonnegative number of hops to traverse. Default: 2.",
                 },
                 "db_path": {
                     "type": "string",
-                    "description": "Path to .blastradius/index.db. Auto-discovered from cwd if omitted.",
+                    "description": "Path to .blastradius/index.db. Defaults to --repo or cwd discovery.",
                 },
             },
             "required": ["file"],
@@ -240,7 +249,7 @@ TOOLS = [
                 },
                 "db_path": {
                     "type": "string",
-                    "description": "Path to .blastradius/index.db. Auto-discovered from cwd if omitted.",
+                    "description": "Path to .blastradius/index.db. Defaults to --repo or cwd discovery.",
                 },
             },
             "required": ["ref"],
@@ -249,33 +258,8 @@ TOOLS = [
 ]
 
 
-def _resolve_index(index_path: str | None) -> dict:
-    if index_path:
-        return load(Path(index_path))
-    discovered = find_index(Path.cwd())
-    if not discovered:
-        raise FileNotFoundError(
-            f"No {INDEX_FILENAME} found. Run: blastradius analyze <repo>"
-        )
-    return load(discovered)
-
-
-def _resolve_file_id(file_path: str, data: dict) -> str | None:
-    fp = Path(file_path)
-    node_ids = {n["id"] for n in data["nodes"]}
-    if str(fp) in node_ids:
-        return str(fp)
-    # Try matching by suffix (relative path without leading ./)
-    clean = str(fp).lstrip("./")
-    for nid in node_ids:
-        if nid.endswith(clean) or clean.endswith(nid):
-            return nid
-    return None
-
-
-def _call_analyze_repo(params: dict) -> dict:
-    repo_path = params["repo_path"]
-    data = build(repo_path)
+def _call_analyze_repo(params: dict, artifacts: Artifacts) -> dict:
+    data = build(str(artifacts.path(params["repo_path"])))
     return {
         "success": True,
         "files": data["meta"]["total_files"],
@@ -284,31 +268,29 @@ def _call_analyze_repo(params: dict) -> dict:
     }
 
 
-def _call_get_impact(params: dict) -> dict:
-    data = _resolve_index(params.get("index_path"))
-    file_id = _resolve_file_id(params["file_path"], data)
-    if not file_id:
-        return {"error": f"File not found in index: {params['file_path']}"}
+def _call_get_impact(params: dict, artifacts: Artifacts) -> dict:
+    data, file_id = artifacts.index_for_file(
+        params["file_path"], params.get("index_path")
+    )
 
     blast_map = compute_blast_radius(data["nodes"], data["links"])
     blast = blast_map.get(file_id)
     if not blast:
-        return {"error": f"No blast data for {file_id}"}
+        raise ValueError(f"No blast data for {file_id}")
 
     total = len([n for n in data["nodes"] if n.get("type") != "import"])
     report = format_markdown(file_id, blast, total)
     return {"file": file_id, "report": report, "blast_score": blast["blast_score"]}
 
 
-def _call_get_dependencies(params: dict) -> dict:
-    data = _resolve_index(params.get("index_path"))
-    file_id = _resolve_file_id(params["file_path"], data)
-    if not file_id:
-        return {"error": f"File not found in index: {params['file_path']}"}
+def _call_get_dependencies(params: dict, artifacts: Artifacts) -> dict:
+    data, file_id = artifacts.index_for_file(
+        params["file_path"], params.get("index_path")
+    )
 
     node = next((n for n in data["nodes"] if n["id"] == file_id), None)
     if not node:
-        return {"error": f"Node not found: {file_id}"}
+        raise ValueError(f"Node not found: {file_id}")
 
     return {
         "file": file_id,
@@ -318,8 +300,8 @@ def _call_get_dependencies(params: dict) -> dict:
     }
 
 
-def _call_get_high_blast_files(params: dict) -> dict:
-    data = _resolve_index(params.get("index_path"))
+def _call_get_high_blast_files(params: dict, artifacts: Artifacts) -> dict:
+    data = artifacts.index(params.get("index_path"))
     threshold = float(params.get("threshold", 5))
     _NON_FILE_TYPES = {"import", "service", "pipeline", "database"}
     results = [
@@ -337,38 +319,19 @@ def _call_get_high_blast_files(params: dict) -> dict:
     return {"files": results, "count": len(results), "threshold": threshold}
 
 
-def _find_symbol_index(start: Path) -> Path | None:
-    for d in [start, *start.parents]:
-        p = d / SYMBOL_INDEX_FILENAME
-        if p.exists():
-            return p
-    return None
-
-
-def _resolve_symbol_index(symbol_index_path: str | None) -> dict:
-    if symbol_index_path:
-        p = Path(symbol_index_path)
-    else:
-        p = _find_symbol_index(Path.cwd())
-    if not p or not p.exists():
-        raise FileNotFoundError(
-            f"No {SYMBOL_INDEX_FILENAME} found. Run: blastradius symbols <repo>"
-        )
-    return json.loads(p.read_text())
-
-
-def _call_lookup_symbol(params: dict) -> dict:
-    from blastradius.store import Store
-
+def _call_lookup_symbol(params: dict, artifacts: Artifacts) -> dict:
     name = params["name"]
     matches = []
+    explicit = params.get("symbol_index_path")
 
     # Prefer SQLite DB (same data source as semantic_search)
-    db_path = find_db(Path.cwd())
-    if db_path:
-        store = Store(db_path)
+    try:
+        db_path = artifacts.find(".blastradius/index.db")
+    except FileNotFoundError:
+        db_path = None
+    if db_path and explicit is None:
+        store = artifacts.database(db_path)
         rows = store.lookup_by_name(name)
-        store.close()
         matches = [
             {
                 "file": r["file"],
@@ -383,7 +346,7 @@ def _call_lookup_symbol(params: dict) -> dict:
     # Fall back to symbolindex.json when DB not available
     if not matches:
         try:
-            sym_data = _resolve_symbol_index(params.get("symbol_index_path"))
+            sym_data = artifacts.symbol_index(explicit)
             raw = sym_data.get("symbols", {}).get(name, [])
             matches = [
                 {
@@ -396,19 +359,20 @@ def _call_lookup_symbol(params: dict) -> dict:
                 for m in raw
             ]
         except FileNotFoundError:
-            pass
+            if explicit is not None or db_path is None:
+                raise
 
     if not matches:
         return {"found": False, "name": name, "matches": []}
     return {"found": True, "name": name, "matches": matches}
 
 
-def _call_build_symbol_index(params: dict) -> dict:
+def _call_build_symbol_index(params: dict, artifacts: Artifacts) -> dict:
     from blastradius.symbols import build_symbol_index as _build
     from blastradius.symbols import write_standalone
 
-    repo_path = params["repo_path"]
-    symbol_data = _build(repo_path)
+    repo_path = artifacts.path(params["repo_path"])
+    symbol_data = _build(str(repo_path))
     out = Path(repo_path) / SYMBOL_INDEX_FILENAME
     write_standalone(symbol_data, out)
     return {
@@ -419,28 +383,12 @@ def _call_build_symbol_index(params: dict) -> dict:
     }
 
 
-def _resolve_db(params: dict):
-    """Return an open Store for the db_path in params or auto-discovered from cwd."""
-    from blastradius.store import Store
-
-    db_path_str = params.get("db_path")
-    if db_path_str:
-        db_path = Path(db_path_str)
-    else:
-        db_path = find_db(Path.cwd())
-    if not db_path or not db_path.exists():
-        raise FileNotFoundError(
-            "No .blastradius/index.db found — run: blastradius analyze <repo>"
-        )
-    return Store(db_path)
-
-
-def _call_semantic_search(params: dict) -> dict:
+def _call_semantic_search(params: dict, artifacts: Artifacts) -> dict:
     import os
 
     from blastradius.semantic.search import hybrid_search
 
-    store = _resolve_db(params)
+    store = artifacts.database(params.get("db_path"))
 
     provider = None
     endpoint = os.environ.get("BLASTRADIUS_EMBEDDING_ENDPOINT", "")
@@ -459,11 +407,11 @@ def _call_semantic_search(params: dict) -> dict:
     as_of_reachable = None
     as_of = params.get("as_of")
     if as_of:
-        repo_root_str = store.get_meta("repo_root")
-        repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
+        repo_root = artifacts.repository(store, params.get("db_path"))
         full_hash = git_resolve(repo_root, as_of)
-        if full_hash:
-            as_of_reachable = git_reachable(repo_root, full_hash)
+        if not full_hash:
+            raise ValueError(f"Could not resolve ref: {as_of}")
+        as_of_reachable = git_reachable(repo_root, full_hash)
 
     results = hybrid_search(
         store=store,
@@ -472,8 +420,6 @@ def _call_semantic_search(params: dict) -> dict:
         as_of_reachable=as_of_reachable,
         provider=provider,
     )
-    store.close()
-
     # File-level aggregation: group by file, sorted by symbol hit count
     from collections import Counter
 
@@ -487,45 +433,31 @@ def _call_semantic_search(params: dict) -> dict:
     }
 
 
-def _call_temporal_impact(params: dict) -> dict:
-    store = _resolve_db(params)
-    repo_root_str = store.get_meta("repo_root")
-    repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
+def _call_temporal_impact(params: dict, artifacts: Artifacts) -> dict:
+    store = artifacts.database(params.get("db_path"))
+    repo_root = artifacts.repository(store, params.get("db_path"))
 
     as_of = params.get("as_of")
     file_arg = params["file"]
 
     # Resolve file path against indexed files
     all_paths = [r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()]
-    clean = file_arg.lstrip("./")
-    file_id = None
-    if file_arg in all_paths:
-        file_id = file_arg
-    else:
-        for p in all_paths:
-            if p.endswith(clean) or clean.endswith(p):
-                file_id = p
-                break
+    file_id = resolve_file_id(file_arg, all_paths, repo_root)
 
     if not file_id:
-        store.close()
-        return {"error": f"File not found in index: {file_arg}"}
+        raise ValueError(f"File not found in index: {file_arg}")
 
     if as_of:
         full_hash = git_resolve(repo_root, as_of)
         if not full_hash:
-            store.close()
-            return {"error": f"Could not resolve ref: {as_of}"}
+            raise ValueError(f"Could not resolve ref: {as_of}")
         reachable = git_reachable(repo_root, full_hash)
         blast = store.as_of_impact(file_id, reachable)
-        store.close()
         if blast is None:
-            return {
-                "error": (
-                    f"No temporal data for {file_id} at {as_of}. "
-                    "Run `blastradius history` to backfill or `blastradius analyze` at each commit."
-                )
-            }
+            raise ValueError(
+                f"No temporal data for {file_id} at {as_of}. "
+                "Run `blastradius history` to backfill or `blastradius analyze` at each commit."
+            )
         return {
             "file": file_id,
             "as_of": as_of,
@@ -537,15 +469,14 @@ def _call_temporal_impact(params: dict) -> dict:
         }
 
     # Current HEAD: fall back to JSON-based path
-    store.close()
-    data = _resolve_index(None)
-    fid2 = _resolve_file_id(file_arg, data)
+    data = artifacts.index(repo_root / INDEX_FILENAME)
+    fid2 = resolve_file_id(file_arg, (n["id"] for n in data["nodes"]), repo_root)
     if not fid2:
-        return {"error": f"File not found in index: {file_arg}"}
+        raise ValueError(f"File not found in index: {file_arg}")
     blast_map = compute_blast_radius(data["nodes"], data["links"])
     blast = blast_map.get(fid2)
     if not blast:
-        return {"error": f"No blast data for {fid2}"}
+        raise ValueError(f"No blast data for {fid2}")
     total = len([n for n in data["nodes"] if n.get("type") != "import"])
     report = format_markdown(fid2, blast, total)
     return {
@@ -559,8 +490,8 @@ def _call_temporal_impact(params: dict) -> dict:
     }
 
 
-def _call_graph_query(params: dict) -> dict:
-    store = _resolve_db(params)
+def _call_graph_query(params: dict, artifacts: Artifacts) -> dict:
+    store = artifacts.database(params.get("db_path"))
     file_arg = params["file"]
     direction = params.get("direction", "both")
     depth = int(params.get("depth", 2))
@@ -570,44 +501,31 @@ def _call_graph_query(params: dict) -> dict:
         r[0]
         for r in store._conn.execute("SELECT path FROM files WHERE active=1").fetchall()
     ]
-    clean = file_arg.lstrip("./")
-    file_id = None
-    if file_arg in all_paths:
-        file_id = file_arg
-    else:
-        for p in all_paths:
-            if p.endswith(clean) or clean.endswith(p):
-                file_id = p
-                break
+    root = artifacts.repository(store, params.get("db_path"))
+    file_id = resolve_file_id(file_arg, all_paths, root)
 
     if not file_id:
-        store.close()
-        return {"error": f"File not found in active index: {file_arg}"}
+        raise ValueError(f"File not found in active index: {file_arg}")
 
     result = store.neighborhood(file_id, direction, depth)
-    store.close()
     return result
 
 
-def _call_changed_since(params: dict) -> dict:
-    store = _resolve_db(params)
-    repo_root_str = store.get_meta("repo_root")
-    repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
+def _call_changed_since(params: dict, artifacts: Artifacts) -> dict:
+    store = artifacts.database(params.get("db_path"))
+    repo_root = artifacts.repository(store, params.get("db_path"))
 
     ref = params["ref"]
     full_hash = git_resolve(repo_root, ref)
     if not full_hash:
-        store.close()
-        return {"error": f"Could not resolve ref: {ref}"}
+        raise ValueError(f"Could not resolve ref: {ref}")
 
     reachable = git_reachable(repo_root, full_hash)
     if not reachable:
-        store.close()
-        return {"error": f"No commits reachable from {ref}"}
+        raise ValueError(f"No commits reachable from {ref}")
 
     result = store.changed_since(reachable)
     last_indexed = store.get_meta("last_indexed_commit") or ""
-    store.close()
     result["ref"] = ref
 
     # Add content-modified files from git (files changed but not added/removed structurally)
@@ -662,83 +580,151 @@ _HANDLERS = {
 }
 
 
-def _send(obj: dict) -> None:
-    sys.stdout.write(json.dumps(obj) + "\n")
-    sys.stdout.flush()
+async def _validated_stream(source, destination, output):
+    """Translate SDK framing errors; valid messages stay entirely SDK-owned."""
+    async with source, destination:
+        async for message in source:
+            if not isinstance(message, Exception):
+                await destination.send(message)
+                continue
+            # SDK stdio emits validation exceptions instead of wire responses.
+            details = message.errors() if hasattr(message, "errors") else []
+            parse_error = any(e["type"] == "json_invalid" for e in details)
+            request = next(
+                (e.get("input") for e in details if isinstance(e.get("input"), dict)),
+                {},
+            )
+            if (
+                request.get("jsonrpc") == "2.0"
+                and isinstance(request.get("method"), str)
+                and "id" not in request
+            ):
+                continue
+            request_id = request.get("id")
+            if type(request_id) not in (int, str):
+                request_id = None
+            await output.send(
+                SessionMessage(
+                    types.JSONRPCError(
+                        jsonrpc="2.0",
+                        id=request_id,
+                        error=types.ErrorData(
+                            code=-32700 if parse_error else -32600,
+                            message="Parse error" if parse_error else "Invalid Request",
+                        ),
+                    )
+                )
+            )
 
 
-def _handle(msg: dict) -> dict | None:
-    method = msg.get("method", "")
-    req_id = msg.get("id")
-    params = msg.get("params", {})
+async def _serve(base: Path, discover: bool) -> None:
+    limiter = anyio.CapacityLimiter(1)
+    validators = {
+        tool["name"]: Draft202012Validator(tool["inputSchema"]) for tool in TOOLS
+    }
 
-    def ok(result):
-        return {"jsonrpc": "2.0", "id": req_id, "result": result}
+    def execute(handler, arguments):
+        with Artifacts(base, discover=discover) as artifacts:
+            return handler(arguments, artifacts)
 
-    def err(code, message):
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "error": {"code": code, "message": message},
-        }
-
-    if method == "initialize":
-        return ok(
-            {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "blastradius", "version": "0.1.0"},
-            }
+    async def list_tools(ctx, params):
+        return types.ListToolsResult(
+            tools=[types.Tool.model_validate(tool) for tool in TOOLS]
         )
 
-    if method == "notifications/initialized":
-        return None  # no response for notifications
-
-    if method == "tools/list":
-        return ok({"tools": TOOLS})
-
-    if method == "tools/call":
-        tool_name = params.get("name")
-        tool_args = params.get("arguments", {})
-        handler = _HANDLERS.get(tool_name)
-        if not handler:
-            return err(-32601, f"Unknown tool: {tool_name}")
+    async def call_tool(ctx, params):
+        if params.arguments is None and "arguments" in params.model_fields_set:
+            raise MCPError(-32602, "arguments must be an object when provided")
+        handler = _HANDLERS.get(params.name)
+        if handler is None:
+            raise MCPError(-32602, f"Unknown tool: {params.name}")
+        error = next(validators[params.name].iter_errors(params.arguments or {}), None)
+        if error:
+            field = ".".join(map(str, error.path)) or "arguments"
+            raise MCPError(-32602, f"Invalid {field}: {error.message}")
         try:
-            result = handler(tool_args)
-            return ok(
-                {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+            result = await anyio.to_thread.run_sync(
+                execute, handler, params.arguments or {}, limiter=limiter
             )
-        except Exception as e:  # noqa: BLE001
-            return ok(
-                {
-                    "content": [{"type": "text", "text": f"Error: {e}"}],
-                    "isError": True,
-                }
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text", text=json.dumps(result, indent=2, allow_nan=False)
+                    )
+                ]
+            )
+        except Exception as exc:  # noqa: BLE001 — tool failures must not kill the transport
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=f"Error: {exc}")],
+                is_error=True,
             )
 
-    if method == "ping":
-        return ok({})
+    server = Server(
+        "blastradius",
+        version=version("blastradius-cli"),
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
+    ready = anyio.Event()
 
-    return err(-32601, f"Method not found: {method}")
+    def reject_constant(value):
+        raise ValueError(f"Invalid JSON constant: {value}")
+
+    async def checked_stdin():
+        # The SDK union currently interprets invalid IDs as notifications,
+        # discarding the ID. Reject them before that information is lost.
+        async for line in anyio.wrap_file(sys.stdin):
+            try:
+                request = json.loads(line, parse_constant=reject_constant)
+            except ValueError:
+                await ready.wait()
+                await output.send(
+                    SessionMessage(
+                        types.JSONRPCError(
+                            jsonrpc="2.0",
+                            id=None,
+                            error=types.ErrorData(code=-32700, message="Parse error"),
+                        )
+                    )
+                )
+                continue
+            if (
+                isinstance(request, dict)
+                and "method" in request
+                and "id" in request
+                and type(request["id"]) not in (int, str)
+            ):
+                await ready.wait()
+                await output.send(
+                    SessionMessage(
+                        types.JSONRPCError(
+                            jsonrpc="2.0",
+                            id=None,
+                            error=types.ErrorData(
+                                code=-32600,
+                                message="Invalid request ID: expected a string or integer",
+                            ),
+                        )
+                    )
+                )
+                continue
+            yield line
+
+    sys.stdin.reconfigure(encoding="utf-8")
+    async with stdio_server(stdin=checked_stdin()) as (source, output):
+        ready.set()
+        destination, incoming = anyio.create_memory_object_stream(0)
+        async with anyio.create_task_group() as group:
+            group.start_soon(_validated_stream, source, destination, output)
+            async with incoming:
+                await server.run(
+                    incoming, output, server.create_initialization_options()
+                )
 
 
-def serve() -> None:
+def serve(repo_path: str | None = None) -> None:
+    base = Path(repo_path).resolve() if repo_path is not None else Path.cwd()
+    if not base.is_dir():
+        raise ValueError(f"Repository directory does not exist: {base}")
     print("[blastradius MCP] ready on stdio", file=sys.stderr)
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            _send(
-                {
-                    "jsonrpc": "2.0",
-                    "id": None,
-                    "error": {"code": -32700, "message": "Parse error"},
-                }
-            )
-            continue
-        response = _handle(msg)
-        if response is not None:
-            _send(response)
+    anyio.run(_serve, base, repo_path is None)
