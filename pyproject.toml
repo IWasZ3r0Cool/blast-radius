@@ -33,7 +33,7 @@ where = ["."]
 include = ["blastradius*"]
 
 [tool.setuptools.package-data]
-"blastradius" = ["py.typed"]
+"blastradius" = ["py.typed", "static/*.html"]
 
 [dependency-groups]
 dev = [
