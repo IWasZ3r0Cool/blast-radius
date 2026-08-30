@@ -269,13 +269,13 @@ Protocol: JSON-RPC 2.0 over stdio. Entry: `serve()` at line 331.
 
 ---
 
-## 9. Viz (`viz_server.py`, `viz/explorer.html`)
+## 9. Viz (`viz_server.py`, `blastradius/static/explorer.html`)
 
 HTTP server using stdlib `http.server`. Routes:
 
 | Route | Handler | Response |
 |---|---|---|
-| `/`, `/index.html` | `do_GET` (line 53) | Serves `viz/explorer.html` |
+| `/`, `/index.html` | `do_GET` | Serves packaged `blastradius/static/explorer.html` |
 | `/graph` | `do_GET` (line 60) | Serves `blastradius.json` as JSON |
 | `/refresh` | `do_GET` (line 65) | Calls `_run_analysis()` → `index.build()` |
 

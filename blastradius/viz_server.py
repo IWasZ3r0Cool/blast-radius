@@ -1,15 +1,14 @@
-"""Minimal HTTP server for the blastradius visualization UI."""
-
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
 from __future__ import annotations
 
 import json
 import sys
 import threading
+from functools import partial
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from importlib.resources import files
 from pathlib import Path
-
-HERE = Path(__file__).parent
-VIZ_HTML = HERE.parent / "viz" / "explorer.html"
 
 REPO_PATH = "."
 INDEX_FILE: Path = Path("blastradius.json")
@@ -27,6 +26,10 @@ def _run_analysis(repo_path: str, output: Path) -> bool:
 
 
 class _Handler(BaseHTTPRequestHandler):
+    def __init__(self, *args, viz_html: bytes, **kwargs):
+        self._viz_html = viz_html
+        super().__init__(*args, **kwargs)
+
     def log_message(self, fmt, *args):
         print(f"  {self.address_string()} {fmt % args}")
 
@@ -45,6 +48,9 @@ class _Handler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self.send_error(404)
             return
+        self._send_bytes(data, content_type)
+
+    def _send_bytes(self, data: bytes, content_type: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", len(data))
@@ -55,7 +61,7 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
 
         if path in ("/", "/index.html"):
-            self._send_file(VIZ_HTML, "text/html; charset=utf-8")
+            self._send_bytes(self._viz_html, "text/html; charset=utf-8")
 
         elif path == "/graph":
             if INDEX_FILE.exists():
@@ -134,6 +140,21 @@ def _start_watcher(repo_path: str) -> None:
 def serve(
     repo_path: str, port: int = 8080, watch: bool = False, output: Path | None = None
 ) -> None:
+    try:
+        viz_html = (
+            files("blastradius")
+            .joinpath("static")
+            .joinpath("explorer.html")
+            .read_bytes()
+        )
+    except OSError as error:
+        print(
+            "Visualizer UI is missing or unreadable; reinstall blastradius-cli "
+            f"to restore its packaged HTML. Details: {error}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
+
     global REPO_PATH, INDEX_FILE
     REPO_PATH = repo_path
     INDEX_FILE = output or (Path(repo_path).resolve() / "blastradius.json")
@@ -144,7 +165,7 @@ def serve(
     if watch:
         _start_watcher(repo_path)
 
-    server = HTTPServer(("", port), _Handler)
+    server = HTTPServer(("", port), partial(_Handler, viz_html=viz_html))
     print(
         f"\nServing at http://localhost:{port}/\n  repo: {repo_path}\n  index: {INDEX_FILE}\n"
     )
