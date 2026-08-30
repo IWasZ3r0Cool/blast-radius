@@ -136,6 +136,30 @@ def test_source_checkout_serves_visualizer_outside_checkout(tmp_path: Path) -> N
         _assert_routes(port, repo)
 
 
+@pytest.mark.parametrize("dns", ["unavailable", "slow"])
+def test_visualizer_starts_without_hostname_lookup(tmp_path: Path, dns: str) -> None:
+    # Inject failure at the DNS boundary, leaving analysis, CLI startup and HTTP
+    # handling real. A slow resolver must not delay serving a local repository.
+    script = f"""
+import socket
+import time
+from blastradius.cli import main
+
+def unavailable_dns(host):
+    if {dns!r} == "slow":
+        time.sleep(60)
+    raise OSError("DNS must not be needed to serve the visualizer")
+
+socket.getfqdn = unavailable_dns
+main()
+"""
+    with _running_cli([sys.executable, "-c", script], tmp_path, source=True) as (
+        port,
+        repo,
+    ):
+        _assert_routes(port, repo)
+
+
 def test_installed_wheel_serves_visualizer(
     installed_package: InstalledTool, tmp_path: Path
 ) -> None:

@@ -1,11 +1,11 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Git history backfill via plumbing — never touches the working tree.
 
 Dependency rule: must not import from blastradius.graph or blastradius.semantic.
 """
-
-from __future__ import annotations
 
 import ast
 import re
@@ -37,7 +37,13 @@ _PARSEABLE = frozenset(
 
 def _run(cmd: list, cwd: Path, timeout: int = 60) -> str:
     r = subprocess.run(
-        cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+        cmd,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
     )
     return r.stdout if r.returncode == 0 else ""
 
