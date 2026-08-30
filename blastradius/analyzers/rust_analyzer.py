@@ -5,6 +5,7 @@ from __future__ import annotations
 """Rust repository analyzer."""
 
 import sys
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,7 +71,8 @@ class _CrateTarget:
     crate_name: str
     kind: str
     package: _CargoPackage | None
-    modules: dict[tuple[str, ...], str] = field(default_factory=dict)
+    modules: dict[tuple[str, ...], list[str]] = field(default_factory=dict)
+    declared_modules: dict[tuple[str, ...], list[str]] = field(default_factory=dict)
     file_modules: dict[str, list[tuple[str, ...]]] = field(default_factory=dict)
 
 
@@ -579,13 +581,25 @@ def _module_candidate(
     return None
 
 
-def _add_module(target: _CrateTarget, module: tuple[str, ...], relative: str) -> bool:
-    changed = target.modules.get(module) != relative
-    target.modules[module] = relative
+def _add_module(
+    target: _CrateTarget,
+    module: tuple[str, ...],
+    relative: str,
+    *,
+    declared: bool = False,
+) -> bool:
+    if declared:
+        declared_candidates = target.declared_modules.setdefault(module, [])
+        if relative not in declared_candidates:
+            declared_candidates.append(relative)
+    candidates = target.modules.setdefault(module, [])
+    if relative in candidates:
+        return False
+    candidates.append(relative)
     paths = target.file_modules.setdefault(relative, [])
     if module not in paths:
         paths.append(module)
-    return changed
+    return True
 
 
 def _build_target_modules(
@@ -629,28 +643,29 @@ def _build_target_modules(
             continue
         _add_module(target, module, _relative(path, root))
 
-    changed = True
-    while changed:
-        changed = False
-        for relative, module_paths in list(target.file_modules.items()):
-            source = root / relative
-            items = source_items.get(relative, _RustItems())
-            for source_module in list(module_paths):
-                for declaration in items.mods:
-                    candidate = _module_candidate(
-                        source,
-                        declaration,
-                        target.root_file is not None
-                        and source.resolve() == target.root_file.resolve(),
-                        all_files,
-                        root,
-                    )
-                    if candidate is None:
-                        continue
-                    logical = (
-                        source_module + declaration.inline_scope + (declaration.name,)
-                    )
-                    changed = _add_module(target, logical, candidate) or changed
+    pending = deque(
+        (relative, module)
+        for relative, modules in target.file_modules.items()
+        for module in modules
+    )
+    while pending:
+        relative, source_module = pending.popleft()
+        source = root / relative
+        items = source_items.get(relative, _RustItems())
+        for declaration in items.mods:
+            candidate = _module_candidate(
+                source,
+                declaration,
+                target.root_file is not None
+                and source.resolve() == target.root_file.resolve(),
+                all_files,
+                root,
+            )
+            if candidate is None:
+                continue
+            logical = source_module + declaration.inline_scope + (declaration.name,)
+            if _add_module(target, logical, candidate, declared=True):
+                pending.append((candidate, logical))
 
 
 def _discover_targets(
@@ -701,14 +716,17 @@ def _discover_targets(
     return targets
 
 
-def _longest_module(
+def _longest_modules(
     target: _CrateTarget, parts: tuple[str, ...], minimum: int
-) -> str | None:
+) -> list[str]:
     for length in range(len(parts), minimum - 1, -1):
-        candidate = target.modules.get(parts[:length])
-        if candidate is not None:
-            return candidate
-    return None
+        prefix = parts[:length]
+        # Explicit declarations replace filesystem guesses, but retain every
+        # statically visible conditional variant at the same logical path.
+        candidates = target.declared_modules.get(prefix) or target.modules.get(prefix)
+        if candidates:
+            return candidates
+    return []
 
 
 def _library_target(package: _CargoPackage) -> _CrateTarget | None:
@@ -719,13 +737,12 @@ def _resolve_use(
     parts: tuple[str, ...],
     source_module: tuple[str, ...],
     target: _CrateTarget,
-) -> tuple[str, str] | None:
+) -> list[tuple[str, str]]:
     if not parts:
-        return None
+        return []
     first = parts[0]
     if first == "crate":
-        resolved = _longest_module(target, parts[1:], 0)
-        return ("internal", resolved) if resolved else None
+        return [("internal", path) for path in _longest_modules(target, parts[1:], 0)]
     if first in {"self", "super"}:
         base = list(source_module)
         index = 0
@@ -736,13 +753,15 @@ def _resolve_use(
                 if base:
                     base.pop()
                 index += 1
-        resolved = _longest_module(target, tuple(base) + parts[index:], 0)
-        return ("internal", resolved) if resolved else None
+        return [
+            ("internal", path)
+            for path in _longest_modules(target, tuple(base) + parts[index:], 0)
+        ]
 
     for base in (source_module, ()):
-        resolved = _longest_module(target, base + parts, len(base) + 1)
+        resolved = _longest_modules(target, base + parts, len(base) + 1)
         if resolved:
-            return "internal", resolved
+            return [("internal", path) for path in resolved]
 
     package = target.package
     dependency = package.local_dependencies.get(first) if package else None
@@ -756,13 +775,13 @@ def _resolve_use(
     if dependency is not None:
         library = _library_target(dependency)
         if library is not None:
-            resolved = _longest_module(library, parts[1:], 0)
+            resolved = _longest_modules(library, parts[1:], 0)
             if resolved:
-                return "internal", resolved
+                return [("internal", path) for path in resolved]
 
     if first not in STDLIB_CRATES:
-        return "external", first
-    return None
+        return [("external", first)]
+    return []
 
 
 def resolve_mod_decl(mod_name: str, file_path: Path, root: Path, all_files: set):
@@ -848,14 +867,14 @@ def analyze(root: Path, group_map: dict):
                         use_path, source_module + inline_scope, context
                     )
                     if resolved:
-                        import_targets.append(resolved)
+                        import_targets.extend(resolved)
             for crate, inline_scope in items.extern_crates:
                 for source_module in source_modules:
                     resolved = _resolve_use(
                         (crate,), source_module + inline_scope, context
                     )
                     if resolved:
-                        import_targets.append(resolved)
+                        import_targets.extend(resolved)
 
         seen = set()
         deduped = []
