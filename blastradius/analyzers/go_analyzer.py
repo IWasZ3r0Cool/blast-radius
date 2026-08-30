@@ -129,7 +129,8 @@ def _scan_go_source(source: str) -> tuple[str | None, list[str]]:
     while index < len(tokens):
         token = tokens[index]
         if (
-            token.value == "package"
+            token.kind == "identifier"
+            and token.value == "package"
             and index + 1 < len(tokens)
             and tokens[index + 1].kind == "identifier"
             and package_name is None
@@ -137,19 +138,23 @@ def _scan_go_source(source: str) -> tuple[str | None, list[str]]:
             package_name = tokens[index + 1].value
             index += 2
             continue
-        if token.value != "import" or index + 1 >= len(tokens):
+        if (
+            token.kind != "identifier"
+            or token.value != "import"
+            or index + 1 >= len(tokens)
+        ):
             index += 1
             continue
 
         index += 1
-        if tokens[index].value == "(":
+        if tokens[index].kind == "punctuation" and tokens[index].value == "(":
             depth = 1
             index += 1
             while index < len(tokens) and depth:
                 current = tokens[index]
-                if current.value == "(":
+                if current.kind == "punctuation" and current.value == "(":
                     depth += 1
-                elif current.value == ")":
+                elif current.kind == "punctuation" and current.value == ")":
                     depth -= 1
                 elif (
                     current.kind == "string"
