@@ -9,7 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.package_support import InstalledTool, environment, run
+from tests.package_support import (
+    InstalledTool,
+    assert_tool_executable,
+    environment,
+    run,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,5 +65,5 @@ def installed_package(tmp_path_factory) -> InstalledTool:
     scripts = tool_dir / "blastradius-cli" / ("Scripts" if os.name == "nt" else "bin")
     python = scripts / ("python.exe" if os.name == "nt" else "python")
     executable = bin_dir / ("blastradius.exe" if os.name == "nt" else "blastradius")
-    assert shutil.which("blastradius", path=env["PATH"]) == str(executable)
+    assert_tool_executable(executable, env["PATH"])
     return InstalledTool(python, executable, env, sdist, wheel)

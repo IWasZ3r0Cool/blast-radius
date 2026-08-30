@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import NamedTuple
@@ -14,6 +15,16 @@ class InstalledTool(NamedTuple):
     env: dict[str, str]
     sdist: Path
     wheel: Path
+
+
+def assert_tool_executable(executable: Path, search_path: str) -> None:
+    """Check that PATH selects the isolated installation under test."""
+    discovered = shutil.which("blastradius", path=search_path)
+    assert discovered is not None, "blastradius was not found on the tool PATH"
+    assert executable.is_file(), f"Installed executable is missing: {executable}"
+    assert Path(discovered).samefile(executable), (
+        f"PATH selected {discovered}, not the isolated tool {executable}"
+    )
 
 
 def environment() -> dict[str, str]:

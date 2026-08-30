@@ -9,9 +9,19 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
 from pathlib import Path
+from socketserver import TCPServer
 
 REPO_PATH = "."
 INDEX_FILE: Path = Path("blastradius.json")
+
+
+class _HTTPServer(HTTPServer):
+    def server_bind(self) -> None:
+        # HTTPServer resolves the machine's FQDN here, before listen(). That
+        # lookup can stall local startup on hosts with slow or unavailable DNS.
+        # Our handlers do not need a canonical hostname; keep the bind address.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 def _run_analysis(repo_path: str, output: Path) -> bool:
@@ -166,11 +176,13 @@ def serve(
     if watch:
         _start_watcher(repo_path)
 
-    server = HTTPServer(("", port), partial(_Handler, viz_html=viz_html))
-    print(
-        f"\nServing at http://localhost:{port}/\n  repo: {repo_path}\n  index: {INDEX_FILE}\n"
-    )
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopped.")
+    print(f"Starting visualizer HTTP server on port {port} …", file=sys.stderr)
+    with _HTTPServer(("", port), partial(_Handler, viz_html=viz_html)) as server:
+        print(
+            f"\nServing at http://localhost:{port}/\n  repo: {repo_path}\n  index: {INDEX_FILE}\n",
+            flush=True,
+        )
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\nStopped.")

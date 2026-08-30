@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from importlib.metadata import version
 from pathlib import Path
 
@@ -509,6 +510,101 @@ def git(repo, *args):
         check=True,
     )
     return result.stdout.strip()
+
+
+@pytest.mark.parametrize("modern", [False, True])
+def test_git_tools_finish_without_reading_protocol_input(tmp_path, modern):
+    repo = tmp_path / "history"
+    shutil.copytree(ROOT / "tests/fixtures/simple_python", repo)
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.invalid")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "Initial fixture")
+    baseline = git(repo, "rev-parse", "HEAD")
+    # Model a child inspecting inherited stdin (the Windows pipe-hang shape)
+    # at the OS boundary. The real CLI, SDK, tools and Git commands still run.
+    # No extra protocol message or EOF may be needed to unblock a tool call.
+    script = """
+import shutil
+import subprocess
+import sys
+from blastradius.cli import main
+
+git_executable = shutil.which("git")
+class StdinSensitiveChild(subprocess.Popen):
+    def __init__(self, command, *args, **kwargs):
+        if command[0] == "git" and kwargs.get("stdin") is None:
+            command = [
+                sys.executable, "-c",
+                "import os, sys; sys.stdin.buffer.read(1); os.execv(sys.argv[1], sys.argv[1:])",
+                git_executable, *command[1:]
+            ]
+        super().__init__(command, *args, **kwargs)
+
+subprocess.Popen = StdinSensitiveChild
+main()
+"""
+    with MCPClient(
+        [sys.executable, "-c", script, "serve", "--mcp", "--repo", str(repo)],
+        tmp_path,
+        env={**environment(), "PYTHONPATH": str(ROOT)},
+    ) as client:
+        if modern:
+            client.version = "2026-07-28"
+            assert len(client.send("tools/list")["result"]["tools"]) == 10
+        else:
+            client.initialize()
+        client.timeout = 5
+        assert (
+            payload(client.call_tool("analyze_repo", {"repo_path": "."}))["files"] == 3
+        )
+        (repo / "main.py").write_text(
+            (repo / "main.py").read_text(encoding="utf-8") + "\nnew_value = 42\n",
+            encoding="utf-8",
+        )
+        git(repo, "add", "main.py")
+        git(repo, "commit", "-m", "Modify main")
+        payload(client.call_tool("analyze_repo", {"repo_path": "."}))
+        assert payload(client.call_tool("changed_since", {"ref": baseline}))[
+            "modified_files"
+        ] == ["main.py"]
+        assert (
+            payload(
+                client.call_tool(
+                    "temporal_impact", {"file": "models.py", "as_of": baseline}
+                )
+            )["direct_dependents"]
+            == 2
+        )
+        assert len(client.send("tools/list")["result"]["tools"]) == 10
+
+
+def test_history_backfill_does_not_inherit_server_input(tmp_path, monkeypatch):
+    from blastradius.index import build
+    from blastradius.store import Store
+    from blastradius.temporal import backfill
+
+    repo = tmp_path / "history"
+    shutil.copytree(ROOT / "tests/fixtures/simple_python", repo)
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.name", "Test")
+    git(repo, "config", "user.email", "test@example.invalid")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "Initial fixture")
+    build(str(repo))
+    popen = subprocess.Popen
+
+    def isolated_child(command, *args, **kwargs):
+        if command[0] == "git" and kwargs.get("stdin") is None:
+            raise AssertionError("Git child would inherit the server input pipe")
+        return popen(command, *args, **kwargs)
+
+    # Guard the process boundary; exercise real Git log/tree/blob reading and
+    # storage, including cat-file's separate input pipe for its batch queries.
+    monkeypatch.setattr(subprocess, "Popen", isolated_child)
+    with closing(Store(repo / ".blastradius/index.db")) as store:
+        assert backfill(repo, store) == (1, 3)
 
 
 def test_all_ten_tools_return_meaningful_results_with_history(tmp_path):

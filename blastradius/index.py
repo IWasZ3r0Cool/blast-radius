@@ -30,10 +30,13 @@ def db_path_for(repo_root: Path) -> Path:
 
 
 def _git_head(root: Path) -> str | None:
+    # Noninteractive Git children must never inherit MCP's live protocol pipe.
+    # On Windows even inspecting that pipe during child startup can block.
     try:
         r = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=root,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=10,
@@ -50,6 +53,7 @@ def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
         r = subprocess.run(
             ["git", "diff", "--name-status", from_commit, to_commit],
             cwd=root,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,
@@ -71,6 +75,7 @@ def git_modified(root: Path, from_ref: str, to_ref: str = "HEAD") -> list[str]:
         r = subprocess.run(
             ["git", "diff", "--name-status", from_ref, to_ref],
             cwd=root,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,
@@ -92,6 +97,7 @@ def git_reachable(root: Path, ref: str) -> set:
         r = subprocess.run(
             ["git", "log", "--format=%H", ref],
             cwd=root,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=60,
@@ -110,6 +116,7 @@ def git_resolve(root: Path, ref: str) -> str | None:
         r = subprocess.run(
             ["git", "rev-parse", ref],
             cwd=root,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=10,
