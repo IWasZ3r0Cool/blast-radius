@@ -8,7 +8,12 @@ version = "0.3.7"
 description = "Repo dependency analyzer with blast-radius impact scoring for AI-assisted development"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2,<3",
+    "anyio>=4.9,<5",
+    "jsonschema>=4.20,<5",
+]
 
 [project.urls]
 Homepage = "https://github.com/IWasZ3r0Cool/blast-radius"

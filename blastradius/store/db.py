@@ -1,12 +1,12 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """SQLite-backed persistent store for blastradius graph data.
 
 Dependency rule: this module must not import from blastradius.graph or
 blastradius.semantic. The dependency arrow points only upward into this layer.
 """
-
-from __future__ import annotations
 
 import re
 import sqlite3
@@ -125,13 +125,17 @@ class Store:
     def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path))
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._has_vec = False
-        self._vec_dims: int | None = None
-        self._apply_schema()
-        self._maybe_load_vec()
+        try:
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            self._has_vec = False
+            self._vec_dims: int | None = None
+            self._apply_schema()
+            self._maybe_load_vec()
+        except BaseException:
+            self._conn.close()
+            raise
 
     # ── schema ────────────────────────────────────────────────────────────────
 

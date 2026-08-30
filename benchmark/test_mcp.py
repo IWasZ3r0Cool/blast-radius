@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """
 MCP server integration test — exercises all tools via real JSON-RPC stdio.
 
@@ -6,64 +10,18 @@ Usage:
   python benchmark/test_mcp.py [--repo PATH] [--blastradius PATH]
 
 Starts the MCP server as a subprocess, sends JSON-RPC messages, validates responses.
-All tools tested: analyze_repo, get_impact, get_dependencies,
-get_high_blast_files, build_symbol_index, lookup_symbol.
+Checks discovery of all ten tools and exercises the six original tools.
+The pytest MCP suite covers all ten tools, including isolated Git history.
 """
 
-from __future__ import annotations
-
 import json
-import subprocess
 import sys
-import time
 from pathlib import Path
 
-
-# ---------------------------------------------------------------------------
-# JSON-RPC client over subprocess stdio
-# ---------------------------------------------------------------------------
-class MCPClient:
-    def __init__(self, command: list[str], cwd: str) -> None:
-        self._proc = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-        )
-        self._id = 0
-
-    def _next_id(self) -> int:
-        self._id += 1
-        return self._id
-
-    def send(self, method: str, params: dict | None = None) -> dict:
-        msg_id = self._next_id()
-        msg = {"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params or {}}
-        line = json.dumps(msg) + "\n"
-        self._proc.stdin.write(line)
-        self._proc.stdin.flush()
-        raw = self._proc.stdout.readline()
-        if not raw:
-            stderr = self._proc.stderr.read()
-            raise RuntimeError(f"Server closed stdout. stderr: {stderr}")
-        return json.loads(raw)
-
-    def notify(self, method: str, params: dict | None = None) -> None:
-        msg = {"jsonrpc": "2.0", "method": method, "params": params or {}}
-        self._proc.stdin.write(json.dumps(msg) + "\n")
-        self._proc.stdin.flush()
-
-    def call_tool(self, name: str, arguments: dict) -> dict:
-        return self.send("tools/call", {"name": name, "arguments": arguments})
-
-    def close(self) -> None:
-        try:
-            self._proc.stdin.close()
-            self._proc.wait(timeout=3)
-        except Exception:  # noqa: BLE001
-            self._proc.kill()
+if __package__:
+    from benchmark.mcp_client import MCPClient
+else:
+    from mcp_client import MCPClient
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +111,10 @@ def test_tools_list(client: MCPClient, r: Results) -> None:
         "get_high_blast_files",
         "build_symbol_index",
         "lookup_symbol",
+        "semantic_search",
+        "temporal_impact",
+        "graph_query",
+        "changed_since",
     ]:
         r.check(f"tool registered: {name}", name in tools)
 
@@ -176,10 +138,14 @@ def test_get_impact(client: MCPClient, r: Results, file: str) -> None:
     r.check("blast_score present", "blast_score" in data)
     r.check("report present", "report" in data)
 
-    # Unknown file should return error data, not crash
+    # Unknown files are execution errors, not successful JSON payloads.
     resp2 = client.call_tool("get_impact", {"file_path": "nonexistent/file.py"})
-    data2 = _result_data(resp2)
-    r.check("unknown file returns error key", "error" in data2, str(data2))
+    r.check(
+        "unknown file returns an actionable tool error",
+        resp2.get("result", {}).get("isError") is True
+        and "nonexistent/file.py" in _result_text(resp2),
+        str(resp2),
+    )
 
 
 def test_get_dependencies(client: MCPClient, r: Results, file: str) -> None:
@@ -301,9 +267,6 @@ def main() -> None:
     print(f"Command  : {' '.join(command)}")
     print("Starting MCP server…")
 
-    client = MCPClient(command, cwd=repo)
-    time.sleep(0.3)  # let server start
-
     # Discover test fixtures from the repo's own indexes
     index_file = Path(repo) / "blastradius.json"
     sym_file = Path(repo) / "symbolindex.json"
@@ -335,6 +298,7 @@ def main() -> None:
         print(f"Probe symbols: {[s[0] for s in probe_symbols]}")
 
     r = Results()
+    client = MCPClient(command, cwd=repo)
     try:
         test_initialize(client, r)
         test_tools_list(client, r)

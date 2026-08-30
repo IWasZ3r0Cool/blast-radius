@@ -83,7 +83,7 @@ blastradius/
 **Hard partitioning rules:**
 
 - `core/`, `store/`, and `temporal/` **must not import** from `graph/` or `semantic/`. The dependency arrow points only *up*, from the heavy layers down into the core — never the reverse. This is what makes a future extraction a move, not a rewrite.
-- This design proposes optional graph and semantic layers. Currently, `blastradius-cli[semantic]` is the supported semantic extra; there is no separate `graph` extra. The default `uv tool install blastradius-cli` includes the core graph, store, and temporal features with **no** required runtime dependencies. Current installation and supported extras are documented in the [README](../README.md#install).
+- This design proposes optional graph and semantic layers. Currently, `blastradius-cli[semantic]` is the supported semantic extra; there is no separate `graph` extra. The default installation now includes the official MCP SDK and its dependencies and requires Python 3.10+. The core layering remains unchanged. Current installation and supported extras are documented in the [README](../README.md#install).
 - The heavy layers consume the core through its public store/graph API only — never by reaching into core internals — so that when `graph/`+`semantic/` are lifted into a standalone package, the only change is declaring `blastradius` as a dependency.
 
 ## 5. Data model
@@ -299,6 +299,11 @@ Read from `[tool.blastradius]` in `pyproject.toml` and/or `.blastradius.toml`, e
 - **Acceptance:** new MCP tools callable from an MCP client; README documents every new command and config key.
 
 ## 9. Constraints for the implementing agent (hard rules)
+
+Historical constraints for the original temporal work follow. The later MCP SDK
+migration supersedes the package-wide dependency and Python-version promises in
+items 1 and 9: the default package now includes MCP dependencies and requires
+Python 3.10+. The core layering and optional semantic-extension constraints remain.
 
 1. **Preserve the zero-dependency core.** Phases 0–2 add **no** runtime dependencies. `sqlite-vec` (Phase 3) is the only new dependency and must be an optional extra (`blastradius-cli[semantic]`); the tool must run fully without it.
 2. **Respect the partitioning and dependency direction (§4.1).** `core/`, `store/`, and `temporal/` must never import from `graph/` or `semantic/`. The heavy layers depend on the core, never the reverse, and consume it only through its public store/graph API. This keeps a future extraction into a standalone package a clean lift. Any change that creates a core→heavy import is a hard failure.

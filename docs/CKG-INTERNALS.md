@@ -22,7 +22,8 @@ blastradius/
   impact.py                — BFS blast radius; enrich_nodes(); enrich_links()
   symbols.py               — symbol index builder; write_standalone(); write_inline()
   symbol_extractor.py      — per-language symbol extraction (AST + regex)
-  mcp_server.py            — JSON-RPC 2.0 stdio MCP server; 6 tools
+  mcp_server.py            — SDK-backed stdio MCP server; 10 tools
+  artifacts.py             — per-request artifact resolution and database lifetime
   viz_server.py            — HTTP server for D3/Three.js viz; /graph + /refresh endpoints
   hook.py                  — git pre-commit hook installer
   reporter.py              — blast report formatter (stdout / markdown / JSON)
@@ -249,23 +250,40 @@ All query commands load the index via `index.load()` (reads JSON from disk).
 
 ## 8. MCP Server (`mcp_server.py`)
 
-Protocol: JSON-RPC 2.0 over stdio. Entry: `serve()` at line 331.
+Protocol: JSON-RPC 2.0 over stdio, using the official Python MCP SDK v2.
+`serve(repo_path=None)` accepts a fixed default repository without changing cwd.
+Both legacy initialization and modern `2026-07-28` requests are supported.
 
-**Registered tools** (schemas at lines 12–124; handlers at lines 151–266):
+**Registered tools** (explicit input schemas are validated before execution):
 
 | Tool | Handler | Core call |
 |---|---|---|
 | `analyze_repo` | `_call_analyze_repo` | `index.build()` |
 | `get_impact` | `_call_get_impact` | `compute_blast_radius()` |
-| `get_dependencies` | `_call_get_dependencies` | `index.load()` → node lookup |
-| `get_high_blast_files` | `_call_get_high_blast_files` | `index.load()` → filter |
-| `lookup_symbol` | `_call_lookup_symbol` | `symbolindex.json` → dict lookup |
+| `get_dependencies` | `_call_get_dependencies` | `artifacts.index()` → node lookup |
+| `get_high_blast_files` | `_call_get_high_blast_files` | `artifacts.index()` → filter |
+| `lookup_symbol` | `_call_lookup_symbol` | explicit symbol JSON, otherwise SQLite with JSON fallback |
 | `build_symbol_index` | `_call_build_symbol_index` | `symbols.build_symbol_index()` |
+| `semantic_search` | `_call_semantic_search` | keyword + graph search, optional embeddings |
+| `temporal_impact` | `_call_temporal_impact` | historical store query or selected repository's JSON graph |
+| `graph_query` | `_call_graph_query` | store neighborhood query |
+| `changed_since` | `_call_changed_since` | temporal store query + Git changes |
 
-**Key helpers**:
-- `_resolve_index()` (line 127) — loads `blastradius.json`; auto-discovers by walking up from cwd
-- `_resolve_file_id()` (line 138) — fuzzy-matches a path to a node ID by suffix
-- `_handle()` (line 284) — routes JSON-RPC method → handler
+**Execution and resolution**:
+
+- The SDK owns protocol routing, initialization/discovery, and cancellation.
+  A narrow input adapter reports malformed frames and rejects invalid request IDs.
+- Blocking tool work runs in a serialized worker; the protocol loop stays responsive.
+- `artifacts.Artifacts` owns a call's artifact selection and database cleanup.
+  Explicit paths win over `--repo`; cwd discovery is used only without `--repo`.
+- `Artifacts.index_for_file()` keeps a selected JSON export independent of source
+  path resolution. Absolute paths must match an exact node relative to the graph
+  directory or configured/discovered repository context; conflicting matches fail.
+  Detached exports require that context or a repo-relative query, not a suffix guess.
+- `artifacts.resolve_file_id()` prefers exact paths and rejects ambiguous suffixes.
+- Malformed calls and invalid arguments return protocol errors; execution failures
+  use `isError: true`. Successful tools retain their existing JSON text payloads.
+  Cancellation suppresses replies but does not roll back running writes.
 
 ---
 

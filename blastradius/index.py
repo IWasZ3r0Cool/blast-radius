@@ -1,5 +1,7 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Build and persist blastradius.json in the target repo root.
 
 Phase-1 change: build() now also syncs graph data to a SQLite store at
@@ -7,12 +9,11 @@ Phase-1 change: build() now also syncs graph data to a SQLite store at
 consumers keep working without modification.
 """
 
-from __future__ import annotations
-
 import hashlib
 import json
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 from blastradius.analyze import analyze
@@ -186,38 +187,36 @@ def build(repo_path: str, output: Path | None = None) -> dict:
     head_commit = _git_head(root)
     changed_paths: set | None = None
 
-    store = Store(db_path)
-    store.set_meta("repo_root", str(root))
+    with closing(Store(db_path)) as store:
+        store.set_meta("repo_root", str(root))
 
-    last_commit = store.get_meta("last_indexed_commit")
-    if last_commit and head_commit and last_commit != head_commit:
-        changed_paths = _git_changed(root, last_commit, head_commit)
-        print(
-            f"Incremental: {len(changed_paths)} file(s) changed since {last_commit[:8]}",
-            file=sys.stderr,
-        )
-    elif last_commit is None:
-        print("Incremental: first index — full scan", file=sys.stderr)
+        last_commit = store.get_meta("last_indexed_commit")
+        if last_commit and head_commit and last_commit != head_commit:
+            changed_paths = _git_changed(root, last_commit, head_commit)
+            print(
+                f"Incremental: {len(changed_paths)} file(s) changed since {last_commit[:8]}",
+                file=sys.stderr,
+            )
+        elif last_commit is None:
+            print("Incremental: first index — full scan", file=sys.stderr)
 
-    store.sync(data, commit=head_commit, changed_paths=changed_paths)
+        store.sync(data, commit=head_commit, changed_paths=changed_paths)
 
-    if head_commit:
-        store.set_meta("last_indexed_commit", head_commit)
-        store._conn.commit()
+        if head_commit:
+            store.set_meta("last_indexed_commit", head_commit)
+            store._conn.commit()
 
-    # Build and sync symbol index
-    try:
-        from blastradius.symbols import build_symbol_index
+        # Build and sync symbol index
+        try:
+            from blastradius.symbols import build_symbol_index
 
-        symbol_data = build_symbol_index(str(root))
-        store.sync_symbols(symbol_data, commit=head_commit)
-    except Exception as exc:  # noqa: BLE001
-        print(f"Warning: symbol sync failed: {exc}", file=sys.stderr)
+            symbol_data = build_symbol_index(str(root))
+            store.sync_symbols(symbol_data, commit=head_commit)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: symbol sync failed: {exc}", file=sys.stderr)
 
-    # Embed new symbols if an embedding endpoint is configured
-    _embed_new_symbols(store)
-
-    store.close()
+        # Embed new symbols if an embedding endpoint is configured
+        _embed_new_symbols(store)
 
     # Remove content_hash from in-memory data before JSON export to keep
     # the public schema unchanged.
