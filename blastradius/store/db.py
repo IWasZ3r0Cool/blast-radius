@@ -699,7 +699,7 @@ class Store:
         if not _HAS_SQLITE_VEC:
             print(
                 "[blastradius] sqlite-vec not installed — semantic search unavailable. "
-                "Install with: pip install 'blastradius-cli[semantic]'",
+                "Install with: uv tool install --force 'blastradius-cli[semantic]'",
                 file=sys.stderr,
             )
             return False
