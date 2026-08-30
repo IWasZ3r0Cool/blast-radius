@@ -1,5 +1,10 @@
 # Engineering Handoff — blastradius Temporal Knowledge Graph
 
+> Historical handoff: branch state, environment details, and pending work below
+> describe the original session, not current setup instructions. For installation
+> and development, use the [README](README.md#install) and [AGENTS.md](AGENTS.md).
+> The maintained source is [IWasZ3r0Cool/blast-radius](https://github.com/IWasZ3r0Cool/blast-radius).
+
 **Repo:** `IWasZ3r0Cool/blast-radius`  
 **Branch:** `main` (4 commits ahead of origin)  
 **Last commit:** `e863853` — Phase 2 temporal layer  

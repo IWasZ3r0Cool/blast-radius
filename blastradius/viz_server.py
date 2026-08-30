@@ -88,7 +88,8 @@ def _start_watcher(repo_path: str) -> None:
         from watchdog.observers import Observer
     except ImportError:
         print(
-            "watchdog not installed — run: pip install 'blastradius-cli[watch]'",
+            "watchdog not installed — run: "
+            "uv tool install --force 'blastradius-cli[watch]'",
             file=sys.stderr,
         )
         return

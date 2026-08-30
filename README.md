@@ -1,5 +1,9 @@
 # blastradius
 
+[Source repository](https://github.com/IWasZ3r0Cool/blast-radius) ·
+[Issues](https://github.com/IWasZ3r0Cool/blast-radius/issues) ·
+[PyPI package](https://pypi.org/project/blastradius-cli/)
+
 **Temporal code knowledge graph** with blast-radius impact scoring, semantic symbol search, and git-history-aware dependency analysis — for AI-assisted development.
 
 Point it at any project — Python, JavaScript/TypeScript, Go, Ruby, Rust, Java, PHP, and more — and get:
@@ -19,28 +23,99 @@ No build step. No npm. Zero required runtime dependencies — SQLite is stdlib.
 
 ## Install
 
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first, then
+install the published tool into its own isolated environment:
+
 ```bash
-pip install blastradius-cli
+uv tool install blastradius-cli
+blastradius --help
 ```
 
-Or from source:
+The package is **`blastradius-cli`**; the executable is **`blastradius`**. This
+repository maintains and publishes the PyPI package. You do not need to activate
+a virtual environment or add blastradius to the project you want to analyze.
+See uv's [tool guide](https://docs.astral.sh/uv/guides/tools/) for details.
+
+If your shell cannot find `blastradius`, run `uv tool update-shell` and open a new
+terminal. `uv tool dir --bin` shows the executable directory; use
+`command -v blastradius` on macOS/Linux or `Get-Command blastradius` in PowerShell
+to check which executable your shell finds. Remove an older installation with
+its original installer if it shadows the uv-managed command.
+
+### Run without a persistent installation
 
 ```bash
-git clone https://github.com/IWasZ3r0Cool/blast-radius
+uvx --from blastradius-cli blastradius --help
+uvx --from blastradius-cli blastradius analyze ./myapp
+```
+
+`uvx` is shorthand for `uv tool run`. Keep `--from blastradius-cli`: the package
+name differs from the command name. For regular use, MCP clients, and git hooks,
+prefer the persistent installation above.
+
+### Upgrade or uninstall
+
+```bash
+uv tool upgrade blastradius-cli
+uv tool list
+uv tool uninstall blastradius-cli
+```
+
+Upgrades retain the source and version constraints used for installation.
+
+### Install from this repository
+
+PyPI contains the latest **published release**, not unreleased commits. To install
+the default branch directly from this repository (requires Git):
+
+```bash
+uv tool install git+https://github.com/IWasZ3r0Cool/blast-radius.git
+```
+
+Or install a checkout, after selecting the branch or commit you want:
+
+```bash
+git clone https://github.com/IWasZ3r0Cool/blast-radius.git
 cd blast-radius
-pip install -e .
+uv tool install .
 ```
+
+This installs a snapshot of the checkout. Re-run `uv tool install --reinstall .`
+after changing it, or use `uv tool install --editable .` to intentionally track
+local edits. Keep the checkout available for editable installs. Source installs
+replace the same `blastradius-cli` tool; they are not a second executable.
+
+### Develop and test blastradius itself
+
+Inside this repository, use the project environment rather than the installed tool:
+
+```bash
+uv sync --extra dev
+uv run blastradius --help
+uv run pytest
+uv run ruff check blastradius tests
+uv build
+```
+
+The packaging test builds an sdist and wheel, installs the wheel with
+`uv tool install` into temporary tool/bin directories, and exercises the installed
+command outside the checkout. It does not modify your personal tool installation.
 
 ---
 
 ## Quickstart
 
+After installation, run commands from the repository you want to analyze. Replace
+the example file and release tag below with ones that exist in that repository.
+
 ```bash
+cd ./myapp
+
 # Build the dependency index (also writes to .blastradius/index.db)
-blastradius analyze ./myapp
+blastradius analyze .
 
 # Build the symbol index (where every function and class lives)
-blastradius symbols ./myapp
+blastradius symbols .
 
 # See blast radius for a file before touching it
 blastradius impact src/auth.py
@@ -52,9 +127,11 @@ blastradius search "validate auth token"
 blastradius changed-since v1.2.0
 
 # Launch the visualization UI
-blastradius serve --viz --repo ./myapp
-open http://localhost:8080
+blastradius serve --viz --repo .
 ```
+
+Leave the server running and visit **http://localhost:8080/** in your browser.
+Use the HTTP URL, not the HTML file directly; the UI loads your index from `/graph`.
 
 ---
 
@@ -174,7 +251,7 @@ blastradius search QUERY [--k N] [--as-of REF] [--db PATH] [--json]
 Hybrid semantic + keyword + graph symbol search. Finds relevant functions and classes without knowing their exact names.
 
 **Retrieval signals fused with Reciprocal Rank Fusion (RRF):**
-1. **Semantic KNN** — embedding similarity (requires `blastradius[semantic]` + a configured endpoint)
+1. **Semantic KNN** — embedding similarity (requires `blastradius-cli[semantic]` + a configured endpoint)
 2. **FTS5 keyword** — full-text search over symbol names, signatures, and docstrings
 3. **Graph expansion** — structurally adjacent symbols from dependent/dependency files
 
@@ -293,7 +370,7 @@ blastradius serve --viz [--repo PATH] [--port PORT] [--watch]
 blastradius serve --mcp
 ```
 
-`--viz` launches an interactive visualization UI in your browser (5 modes: 2D force graph, 3D network, dependency matrix, treemap, infrastructure graph).
+`--viz` starts a local HTTP server for the interactive visualization UI (5 modes: 2D force graph, 3D network, dependency matrix, treemap, infrastructure graph). Visit the printed URL in your browser; keep the terminal process running. The installed tool includes the HTML, so no source checkout is needed. Use `--port` if port 8080 is already occupied.
 
 `--mcp` starts a stdio MCP server that exposes blastradius tools directly to Claude and other MCP clients.
 
@@ -312,18 +389,21 @@ blastradius serve --mcp
 | `graph_query` | k-hop dependency neighborhood of a file (`dependents`/`dependencies`/`both`) |
 | `changed_since` | Files and edges added or removed since a commit/ref |
 
-**Claude Code MCP config** (`.claude/settings.json`):
+**Claude Code project MCP config** (`.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "blastradius": {
-      "command": "blastradius",
+      "command": "/absolute/path/to/blastradius",
       "args": ["serve", "--mcp"]
     }
   }
 }
 ```
+
+Replace the command with the full path under `uv tool dir --bin` (append
+`blastradius`, or `blastradius.exe` on Windows). See the setup walkthrough below.
 
 ---
 
@@ -480,21 +560,23 @@ blastradius analyze .
 blastradius symbols .
 ```
 
-Register the MCP server with Claude Code using `claude mcp add`. Use `--scope project` to limit it to this repo, or `--scope global` to use it everywhere:
+Register the MCP server with Claude Code using `claude mcp add`. Use `--scope project`
+for this repo, or `--scope user` for all your repos. These are the scopes in
+[Claude Code's MCP documentation](https://code.claude.com/docs/en/mcp).
 
 ```bash
-# Project-scoped (recommended — stored in .claude/settings.json)
+# Project-scoped (stored in .mcp.json)
 claude mcp add --scope project blastradius -- /path/to/blastradius serve --mcp
 
-# Global (available in all repos)
-claude mcp add --scope global blastradius -- /path/to/blastradius serve --mcp
+# User-scoped (available in all your repos)
+claude mcp add --scope user blastradius -- /path/to/blastradius serve --mcp
 ```
 
-Find the full path to your blastradius binary with `which blastradius`, then substitute it above.
+Run `uv tool dir --bin`, append `/blastradius` (`\blastradius.exe` on Windows),
+and substitute that absolute path above. On macOS/Linux, this can be done directly:
 
 ```bash
-# Example with conda install
-claude mcp add --scope project blastradius -- /opt/homebrew/Caskroom/miniforge/base/bin/blastradius serve --mcp
+claude mcp add --scope user blastradius -- "$(uv tool dir --bin)/blastradius" serve --mcp
 ```
 
 Verify it registered:
@@ -502,15 +584,23 @@ Verify it registered:
 claude mcp list
 ```
 
-> **Note:** Do not use `"command": "blastradius"` with a bare name — Claude Code does not inherit your shell PATH, so the binary won't be found unless you use the absolute path.
+> **Note:** A GUI or MCP client may have a different PATH from your terminal.
+> An absolute executable path avoids relying on its shell configuration. Do not
+> commit a machine-specific absolute path in shared `.mcp.json` without adapting
+> it for your team; user scope is convenient for a personal installation.
 
 Claude now has all 10 MCP tools available in every session. When it needs to find `processPayment`, it calls `lookup_symbol("processPayment")` and gets `src/billing.py:142` back in one shot — no file scanning. When it needs to find code that validates auth tokens without knowing the exact name, it calls `semantic_search("validate auth token")`.
 
 **Keep the index fresh:**
 ```bash
-# Auto-rebuild on file changes (leave running in a terminal)
-blastradius symbols . --watch
+# Auto-rebuild the dependency index (requires the watch extra; leave running)
+blastradius analyze . --watch
+
+# Rebuild the standalone symbol index after edits, in another terminal
+blastradius symbols .
 ```
+
+`symbols` does not have a `--watch` flag.
 
 ---
 
@@ -734,29 +824,45 @@ Kind abbreviations: `fn` function · `cls` class · `st` struct · `en` enum · 
 
 | Package | Purpose | Install |
 |---------|---------|---------|
-| `sqlite-vec` | Semantic vector search in `blastradius search` and `semantic_search` MCP tool | `pip install 'blastradius-cli[semantic]'` |
-| `watchdog` | `--watch` file change detection | `pip install 'blastradius-cli[watch]'` |
-| `PyYAML` | Better Docker Compose / CI YAML parsing | `pip install 'blastradius-cli[yaml]'` |
-| `tomli` | Rust `Cargo.toml` on Python < 3.11 | `pip install 'blastradius-cli[toml]'` |
+| `sqlite-vec` | Semantic vector search in `blastradius search` and `semantic_search` MCP tool | `uv tool install --force 'blastradius-cli[semantic]'` |
+| `watchdog` | `--watch` file change detection | `uv tool install --force 'blastradius-cli[watch]'` |
+| `PyYAML` | Better Docker Compose / CI YAML parsing | `uv tool install --force 'blastradius-cli[yaml]'` |
+| `tomli` | Rust `Cargo.toml` on Python < 3.11 | `uv tool install --force 'blastradius-cli[toml]'` |
+
+These commands replace the installed tool's configuration with the requested
+extras; they do not accumulate extras from previous commands. Combine everything
+you need in one specification:
+
+```bash
+uv tool install --force 'blastradius-cli[semantic,watch,yaml,toml]'
+```
+
+The commands above install the published package. To retain a source checkout,
+run `uv tool install --force '.[semantic,watch,yaml,toml]'` from that checkout.
+Manage dependencies through `uv tool`, not by modifying its environment directly.
+For contributor tests, use `uv sync --extra dev --extra semantic` instead.
 
 ### Semantic search configuration
 
 Semantic search requires a self-hosted embedding endpoint (Ollama, LM Studio, llama.cpp server, or any OpenAI-compatible `/v1/embeddings` API) and the `sqlite-vec` extension.
 
 ```bash
-pip install 'blastradius-cli[semantic]'
+uv tool install --force 'blastradius-cli[semantic]'
 
-# Set env vars (add to your shell profile or .env)
+# Export in the shell that launches blastradius (or its MCP client)
 export BLASTRADIUS_EMBEDDING_ENDPOINT=http://localhost:11434
 export BLASTRADIUS_EMBEDDING_MODEL=nomic-embed-text
 export BLASTRADIUS_EMBEDDING_DIMS=768
 
-# Re-index to generate embeddings
-blastradius analyze ./myapp
+# Work in the repository to be indexed and searched
+cd ./myapp
+blastradius analyze .
 
 # Search
 blastradius search "validate JWT token"
 ```
+
+The installed command does not automatically load `.env` files.
 
 Without these env vars, `blastradius search` and the `semantic_search` MCP tool fall back to FTS5 keyword + graph search — no crash, no config required.
 
@@ -764,6 +870,7 @@ Without these env vars, `blastradius search` and the `semantic_search` MCP tool 
 
 ## Requirements
 
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) for the recommended tool installation
 - Python 3.9+
 - A modern browser (for `--viz` mode)
 

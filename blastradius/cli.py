@@ -1,5 +1,5 @@
-"""blastradius CLI entry point."""
-
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
 from __future__ import annotations
 
 import argparse
@@ -20,7 +20,8 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             from watchdog.observers import Observer
         except ImportError:
             print(
-                "watchdog not installed — run: pip install 'blastradius-cli[watch]'",
+                "watchdog not installed — run: "
+                "uv tool install --force 'blastradius-cli[watch]'",
                 file=sys.stderr,
             )
             sys.exit(1)

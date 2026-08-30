@@ -83,7 +83,7 @@ blastradius/
 **Hard partitioning rules:**
 
 - `core/`, `store/`, and `temporal/` **must not import** from `graph/` or `semantic/`. The dependency arrow points only *up*, from the heavy layers down into the core — never the reverse. This is what makes a future extraction a move, not a rewrite.
-- `graph/` and `semantic/` are gated behind optional extras (`blastradius-cli[graph]`, `blastradius-cli[semantic]`). The default `pip install blastradius-cli` installs only the lean core + store + temporal and pulls in **no** new runtime dependencies.
+- This design proposes optional graph and semantic layers. Currently, `blastradius-cli[semantic]` is the supported semantic extra; there is no separate `graph` extra. The default `uv tool install blastradius-cli` includes the core graph, store, and temporal features with **no** required runtime dependencies. Current installation and supported extras are documented in the [README](../README.md#install).
 - The heavy layers consume the core through its public store/graph API only — never by reaching into core internals — so that when `graph/`+`semantic/` are lifted into a standalone package, the only change is declaring `blastradius` as a dependency.
 
 ## 5. Data model

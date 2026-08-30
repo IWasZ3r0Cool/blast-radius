@@ -11,7 +11,9 @@
 
 ## Core Architecture & Package Names
 
-- **PyPI Package Name**: `blastradius-cli` (installed via `pip install blastradius-cli`).
+- **Canonical Repository**: `https://github.com/IWasZ3r0Cool/blast-radius` (use this repository for project, source, and issue links; preserve original copyright attribution).
+- **PyPI Package Name**: `blastradius-cli` (published by this repository's maintainers; install with `uv tool install blastradius-cli`).
+- **One-off tool use**: `uvx --from blastradius-cli blastradius <command>`; the package and executable names differ. Keep `uv run` for development in this checkout.
 - **Python Import Package**: `blastradius` (source in `blastradius/`).
 - **CLI Executable Command**: `blastradius` (entry point `blastradius.cli:main`).
 - **Index artifacts**: Default dependency graph is written to `blastradius.json`; SQLite store is populated at `<repo>/.blastradius/index.db`.
