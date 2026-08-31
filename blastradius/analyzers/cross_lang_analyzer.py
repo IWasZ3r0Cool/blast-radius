@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Cross-language API boundary detector.
 
 Matches backend HTTP route definitions against frontend API call sites and
@@ -150,7 +154,7 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
             for part in f.parts
         ):
             continue
-        rel = str(f.relative_to(root))
+        rel = f.relative_to(root).as_posix()
         if rel not in node_ids:
             continue
         try:
@@ -185,7 +189,7 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
             continue
         if any(part in {"node_modules", ".next", "dist", "build"} for part in f.parts):
             continue
-        rel = str(f.relative_to(root))
+        rel = f.relative_to(root).as_posix()
         if rel not in node_ids:
             continue
         try:

@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Dispatcher: detect languages, delegate to per-language analyzers."""
 
 import sys
@@ -157,12 +161,23 @@ def analyze(root_path: str) -> dict:
 
     def add_results(nodes, ext_nodes, links_map, meta):
         nonlocal total_files, total_loc
+        # Older analyzers return native separators. Keep graph and symbol IDs
+        # portable, including links to files handled by another analyzer.
+        external_ids = {node["id"] for node in ext_nodes}
+
+        def portable_id(value):
+            return value if value in external_ids else value.replace("\\", "/")
+
+        for node in nodes:
+            node["id"] = portable_id(node["id"])
         all_nodes.extend(nodes)
         for en in ext_nodes:
             if en["id"] not in ext_seen:
                 all_nodes.append(en)
                 ext_seen.add(en["id"])
-        merge_links(all_links, links_map)
+        for (source, target), weight in links_map.items():
+            key = (portable_id(source), portable_id(target))
+            all_links[key] = all_links.get(key, 0) + weight
         total_files += meta.get("total_files", 0)
         total_loc += meta.get("total_loc", 0)
         for key in ("framework", "packageManager"):
@@ -181,7 +196,10 @@ def analyze(root_path: str) -> dict:
         node.setdefault("layer", assign_layer(node))
 
     try:
-        workspaces = detect_workspaces(root)
+        workspaces = {
+            path.replace("\\", "/"): name
+            for path, name in detect_workspaces(root).items()
+        }
         assign_packages(all_nodes, workspaces)
         if workspaces:
             meta_extra["workspaces"] = list(workspaces.values())
