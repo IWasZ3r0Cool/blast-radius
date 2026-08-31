@@ -1,6 +1,8 @@
-"""Symbol index builder: standalone symbolindex.json, --inline, and --claude-md modes."""
-
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
 from __future__ import annotations
+
+"""Symbol index builder: standalone symbolindex.json, --inline, and --claude-md modes."""
 
 import json
 import sys
@@ -59,7 +61,7 @@ def build_symbol_index(repo_path: str) -> dict:
     total = 0
 
     for f in files:
-        rel = str(f.relative_to(root))
+        rel = f.relative_to(root).as_posix()
         syms = extract_symbols(f)
         if not syms:
             continue

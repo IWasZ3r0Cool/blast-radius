@@ -742,7 +742,12 @@ def test_unicode_paths_work_with_non_utf8_parent_settings(tmp_path):
     repo = tmp_path / "répertoire_日本"
     repo.mkdir()
     (repo / "café.py").write_text("class Café: pass\n", encoding="utf-8")
-    with launch(tmp_path, "--repo", repo, env={"PYTHONIOENCODING": "cp1252"}) as client:
+    with launch(
+        tmp_path,
+        "--repo",
+        repo,
+        env={"PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"},
+    ) as client:
         client.initialize()
         payload(client.call_tool("analyze_repo", {"repo_path": str(repo)}))
         result = payload(client.call_tool("lookup_symbol", {"name": "Café"}))

@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Python repository analyzer (AST-based)."""
 
 import ast
@@ -58,15 +62,17 @@ def resolve_internal(mod_name: str, file_path: Path, root: Path, all_files: set)
             parts = mod_part.split(".")
             try:
                 candidates = [
-                    str((base / "/".join(parts)).relative_to(root)) + ".py",
-                    str((base / "/".join(parts) / "__init__.py").relative_to(root)),
+                    (base / "/".join(parts)).relative_to(root).as_posix() + ".py",
+                    (base / "/".join(parts) / "__init__.py")
+                    .relative_to(root)
+                    .as_posix(),
                 ]
             except ValueError:
                 return None
         else:
             # bare `from . import X` with no module part — points to the package itself
             try:
-                c = str((base / "__init__.py").relative_to(root))
+                c = (base / "__init__.py").relative_to(root).as_posix()
                 return c if c in all_files else None
             except ValueError:
                 return None
@@ -83,7 +89,7 @@ def resolve_internal(mod_name: str, file_path: Path, root: Path, all_files: set)
     for c in candidates:
         if c in all_files:
             return c
-    rel_base = str(file_path.parent.relative_to(root))
+    rel_base = file_path.parent.relative_to(root).as_posix()
     if rel_base != ".":
         for c in candidates:
             full = f"{rel_base}/{c}"
@@ -100,20 +106,21 @@ def analyze(root: Path, group_map: dict):
     patterns = load_gitignore_patterns(root)
     py_files = collect_files(root, patterns)
 
-    all_rel: set[str] = {str(f.relative_to(root)) for f in py_files}
+    all_rel: set[str] = {f.relative_to(root).as_posix() for f in py_files}
     nodes = []
     links_map: dict[tuple[str, str], int] = {}
     external_nodes: dict[str, dict] = {}
     total_loc = 0
 
     for f in py_files:
-        rel = str(f.relative_to(root))
+        rel = f.relative_to(root).as_posix()
         try:
-            source = f.read_text(errors="replace")
+            # Let Python's parser honor UTF-8, BOMs, and source encoding cookies.
+            source = f.read_bytes()
         except OSError:
             continue
 
-        loc = source.count("\n") + 1
+        loc = source.replace(b"\r\n", b"\n").replace(b"\r", b"\n").count(b"\n") + 1
         total_loc += loc
 
         try:

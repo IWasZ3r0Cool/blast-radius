@@ -22,6 +22,8 @@ jobs:
           - os: ubuntu-latest
             python: '3.14'
           - os: windows-latest
+            python: '3.10'
+          - os: windows-latest
             python: '3.14'
           - os: macos-latest
             python: '3.14'

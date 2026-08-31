@@ -1,6 +1,8 @@
-"""Per-language symbol extraction for the blastradius symbol index."""
-
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
 from __future__ import annotations
+
+"""Per-language symbol extraction for the blastradius symbol index."""
 
 import ast
 import re
@@ -16,7 +18,8 @@ def _line_of(source: str, pos: int) -> int:
 
 def extract_python(path: Path) -> list[dict]:
     try:
-        source = path.read_text(errors="replace")
+        # Parsing bytes honors Python source encodings, not the host locale.
+        source = path.read_bytes()
         tree = ast.parse(source, filename=str(path))
     except (OSError, SyntaxError):
         return []
