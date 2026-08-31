@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import shutil
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
 
+from blastradius import __version__
 from tests.package_support import assert_tool_executable
+
+
+def test_import_version_matches_distribution_metadata() -> None:
+    assert __version__ == version("blastradius-cli")
 
 
 def test_tool_discovery_accepts_different_case_for_the_same_file(
