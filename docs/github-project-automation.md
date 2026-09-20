@@ -1,4 +1,4 @@
-# GitHub automation
+# GitHub project automation
 
 ## Optional project assignment
 
