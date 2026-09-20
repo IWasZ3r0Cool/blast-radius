@@ -29,6 +29,7 @@ from tests.package_support import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+SERVER_STARTUP_TIMEOUT = 30 if sys.platform == "win32" else 10
 
 
 def _get(port: int, path: str) -> tuple[int, str, bytes]:
@@ -78,7 +79,10 @@ def _running_cli(
             stderr=subprocess.STDOUT,
         )
         try:
-            deadline = time.monotonic() + 10
+            # Installed tools can take longer to finish their real initial
+            # analysis on Windows CI. Keep the tighter feedback loop on other
+            # platforms while allowing for that startup variance.
+            deadline = time.monotonic() + SERVER_STARTUP_TIMEOUT
             while process.poll() is None and time.monotonic() < deadline:
                 try:
                     _get(port, "/")
