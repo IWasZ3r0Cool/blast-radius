@@ -141,16 +141,22 @@ class Store:
 
     def _apply_schema(self) -> None:
         self._conn.executescript(_DDL)
+
+        fts_ok = False
         try:
             self._conn.executescript(_FTS_DDL)
+            fts_ok = True
         except sqlite3.OperationalError:
-            # FTS5 not available on this SQLite build — degraded gracefully.
-            pass
+            pass  # FTS5 unavailable — degraded gracefully.
+
         existing = self.get_meta("schema_version")
+
         if existing is None:
             self.set_meta("schema_version", SCHEMA_VERSION)
-        elif existing != SCHEMA_VERSION:
+
+        elif existing != SCHEMA_VERSION and fts_ok:
             self._migrate(existing)
+
         self._conn.commit()
 
     def _migrate(self, from_version: str) -> None:
