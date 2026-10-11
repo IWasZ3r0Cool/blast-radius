@@ -416,6 +416,32 @@
     letter-spacing: 0.1em;
   }
   #loading-overlay.hidden { display: none; }
+  #loading-overlay .load-label { min-height: 18px; }
+  #viz-progress-track {
+    width: 240px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  #viz-progress {
+    height: 100%; width: 0%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.15s ease-out;
+    box-shadow: 0 0 8px var(--accent);
+  }
+  #viz-progress-label { font-size: 10px; color: var(--muted); letter-spacing: 0.15em; }
+  #cdn-banner {
+    display: none;
+    margin: 0 32px; padding: 10px 16px;
+    border: 1px solid var(--accent4);
+    border-radius: 6px;
+    background: rgba(245,158,11,0.08);
+    color: var(--accent4);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+  #cdn-banner.visible { display: block; }
   .spinner {
     width: 40px; height: 40px;
     border: 2px solid var(--border);
@@ -613,8 +639,11 @@
 <body>
 <div id="loading-overlay">
   <div class="spinner"></div>
-  <div>LOADING GRAPH DATA…</div>
+  <div class="load-label">LOADING GRAPH DATA…</div>
+  <div id="viz-progress-track"><div id="viz-progress"></div></div>
+  <div id="viz-progress-label">STARTING…</div>
 </div>
+<div id="cdn-banner" role="alert"></div>
 
 <div class="app">
   <header>
@@ -825,6 +854,58 @@ let LINKS = SAMPLE_LINKS;
 let META = { root: "sample_app/", total_files: 6, total_loc: 1490 };
 let graphLoaded = false;
 
+// ─── LOADING PROGRESS + INDEXES ─────────────────────────────────────────────
+// Staged progress bar: updated between awaited stages so the browser paints.
+function setVizProgress(pct, label) {
+  const bar = document.getElementById('viz-progress');
+  const lbl = document.getElementById('viz-progress-label');
+  if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  if (lbl && label) lbl.textContent = label;
+}
+// Yield to the browser so progress + shell paint between heavy stages.
+function vizNextFrame() {
+  return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
+
+// Indexed lookups (built once per loadGraph): O(1) id → node and
+// id → neighbor-id list. Replaces repeated NODES.find / LINKS.filter scans.
+let NODE_INDEX = new Map();
+let ADJ_INDEX = new Map();
+function rebuildVizIndexes() {
+  NODE_INDEX = new Map();
+  ADJ_INDEX = new Map();
+  for (const n of NODES) {
+    NODE_INDEX.set(n.id, n);
+    ADJ_INDEX.set(n.id, []);
+  }
+  for (const l of LINKS) {
+    const s = nodeId(l.source), t = nodeId(l.target);
+    if (ADJ_INDEX.has(s)) ADJ_INDEX.get(s).push(t);
+    if (ADJ_INDEX.has(t)) ADJ_INDEX.get(t).push(s);
+  }
+}
+function connCount(id) {
+  const list = ADJ_INDEX.get(id);
+  return list ? list.length : 0;
+}
+
+// CDN failure banner — actionable error instead of a hanging spinner.
+function checkVizCdn() {
+  const missing = [];
+  if (typeof d3 === 'undefined') missing.push('d3.js');
+  if (typeof THREE === 'undefined') missing.push('three.js');
+  if (!missing.length) return true;
+  const banner = document.getElementById('cdn-banner');
+  if (banner) {
+    banner.textContent = 'Could not load ' + missing.join(' + ') +
+      ' from CDN — check your network connection or ad-blocker, then refresh.';
+    banner.classList.add('visible');
+  }
+  const lbl = document.getElementById('viz-progress-label');
+  if (lbl) lbl.textContent = 'WAITING ON CDN…';
+  return false;
+}
+
 // Language colors (used for "module" type nodes and the language legend)
 const LANG_COLOR_HEX = {
   python:     "#00d4ff",
@@ -875,8 +956,8 @@ function applyLayerFilter() {
     return null;
   });
   d3.selectAll('#graph-svg .link-line').style('display', function(l) {
-    const sn = NODES.find(n => n.id === nodeId(l.source));
-    const tn = NODES.find(n => n.id === nodeId(l.target));
+    const sn = NODE_INDEX.get(nodeId(l.source)) || null;
+    const tn = NODE_INDEX.get(nodeId(l.target)) || null;
     if (sn) {
       if (LAYER_FILTER !== 'all' && sn.layer && sn.layer !== LAYER_FILTER) return 'none';
       if (sn.language && !LANG_FILTER.has(sn.language)) return 'none';
@@ -1056,35 +1137,62 @@ function applyTypeFilter() {
 async function loadGraph() {
   const overlay = document.getElementById('loading-overlay');
   overlay.classList.remove('hidden');
+  setVizProgress(5, 'CONNECTING…');
+  await vizNextFrame(); // let shell + progress paint before heavy work
   try {
     let data;
     if (typeof STANDALONE_DATA !== 'undefined') {
       data = STANDALONE_DATA;
+      setVizProgress(35, 'PARSING…');
     } else {
+      setVizProgress(10, 'FETCHING GRAPH…');
       const res = await fetch('/graph');
       if (!res.ok) throw new Error('no server');
+      setVizProgress(25, 'DOWNLOADING…');
+      await vizNextFrame();
       data = await res.json();
       if (data.error) throw new Error(data.error);
+      setVizProgress(40, 'PARSING…');
     }
+    await vizNextFrame();
     NODES = data.nodes || [];
     LINKS = data.links || [];
     META = data.meta || {};
+    rebuildVizIndexes();
     graphLoaded = true;
+    setVizProgress(55, 'STATS…');
+    await vizNextFrame();
   } catch (e) {
     // Fall back to sample data silently
     NODES = SAMPLE_NODES;
     LINKS = SAMPLE_LINKS;
     META = { root: "sample_app/", total_files: 6, total_loc: 1490 };
+    rebuildVizIndexes();
   }
-  overlay.classList.add('hidden');
   updateStats();
+  setVizProgress(70, 'LAYOUT…');
+  await vizNextFrame();
+  if (typeof d3 === 'undefined') {
+    // CDN blocked: banner is already visible via checkVizCdn(); don't hang.
+    setVizProgress(100, 'CDN UNAVAILABLE');
+    return;
+  }
   // Re-init all rendered views
   threeInit = false; treemapInit = false; matrixInit = false; infraInit = false;
   setLayerFilter('all');
   initForceGraph();
+  setVizProgress(90, 'PAINTING…');
+  await vizNextFrame();
   if (document.getElementById('three-panel').classList.contains('active')) initThree();
   if (document.getElementById('matrix-panel').classList.contains('active')) initMatrix();
   if (document.getElementById('treemap-panel').classList.contains('active')) initTreemap();
+  setVizProgress(100, 'DONE');
+  await vizNextFrame();
+  overlay.classList.add('hidden');
+  // Deferred enhancement: cycle highlighting after first paint.
+  if (typeof cycleEdgesDeferred !== 'undefined' && cycleEdgesDeferred.size) {
+    requestAnimationFrame(() => requestAnimationFrame(highlightCycleEdges));
+  }
 }
 
 // Refresh button — hidden in standalone mode
@@ -1154,6 +1262,8 @@ function nodeId(n) { return typeof n === 'object' ? n.id : n; }
 
 function getConnections(node) {
   const id = nodeId(node);
+  const neighbors = ADJ_INDEX.get(id);
+  if (neighbors) return neighbors.map(nid => NODE_INDEX.get(nid) || nid);
   return LINKS.filter(l => nodeId(l.source) === id || nodeId(l.target) === id);
 }
 
@@ -1188,9 +1298,12 @@ document.addEventListener('mousemove', e => {
 
 function showNodeDetail(node) {
   const id = typeof node === 'string' ? node : node.id;
-  const n = NODES.find(x => x.id === id) || node;
-  const outgoing = LINKS.filter(l => nodeId(l.source) === id).map(l => nodeId(l.target));
-  const incoming = LINKS.filter(l => nodeId(l.target) === id).map(l => nodeId(l.source));
+  const n = NODE_INDEX.get(id) || NODES.find(x => x.id === id) || node;
+  const outgoing = [], incoming = [];
+  for (const l of LINKS) {
+    if (nodeId(l.source) === id) outgoing.push(nodeId(l.target));
+    else if (nodeId(l.target) === id) incoming.push(nodeId(l.source));
+  }
   const panel = document.getElementById('node-info');
   panel.innerHTML = `
     <div class="node-detail">
@@ -1235,6 +1348,26 @@ function findCycles(nodes, links) {
 
 // ─── 2D FORCE GRAPH ─────────────────────────────────────────────────────────
 let forceGraphSim = null;
+// Budget for the initial layout burst: enough for a readable first paint on
+// large graphs without blocking the main thread. Drag/zoom resumes the sim.
+const SIM_TICK_BUDGET = 120;
+const SIM_TIME_BUDGET_MS = 800;
+// Cycle edges computed after first paint so layout isn't blocked.
+let cycleEdgesDeferred = new Set();
+function highlightCycleEdges() {
+  if (!cycleEdgesDeferred.size) return;
+  d3.selectAll('#graph-svg .link-line')
+    .attr('stroke', function(d) {
+      const s = nodeId(d.source), t = nodeId(d.target);
+      if (cycleEdgesDeferred.has(`${s}→${t}`)) return '#ef4444';
+      return d3.select(this).attr('stroke');
+    })
+    .attr('marker-end', function(d) {
+      const s = nodeId(d.source), t = nodeId(d.target);
+      if (cycleEdgesDeferred.has(`${s}→${t}`)) return 'url(#arrow-cycle)';
+      return d3.select(this).attr('marker-end');
+    });
+}
 
 function initForceGraph() {
   // Clear old graph
@@ -1289,7 +1422,9 @@ function initForceGraph() {
 
   const nodes = filteredNodes;
   const links = filteredLinks;
-  const cycleEdges = findCycles(nodes, links);
+  // Defer cycle detection past first paint; render normally, enhance later.
+  const cycleEdges = new Set();
+  cycleEdgesDeferred = new Set();
 
   // Internal node ids set
   const internalIds = new Set(nodes.filter(n => n.type !== 'import').map(n => n.id));
@@ -1311,6 +1446,30 @@ function initForceGraph() {
     .force('center', d3.forceCenter(W/2, H/2))
     .force('collision', d3.forceCollide(d => Math.sqrt(d.size||40) * 0.85 + 8));
   forceGraphSim = sim;
+
+  // Initial-layout budget: stop the sim after N ticks or T ms so first
+  // paint isn't blocked on large graphs. Interaction reheats it.
+  const simStart = performance.now();
+  let simTicks = 0;
+  const simBudget = setInterval(() => {
+    simTicks++;
+    if (simTicks >= SIM_TICK_BUDGET || performance.now() - simStart > SIM_TIME_BUDGET_MS) {
+      clearInterval(simBudget);
+      if (sim.alpha() > sim.alphaMin()) sim.stop();
+    }
+  }, 50);
+  // Interaction reheats a budgeted-out sim.
+  sim.on('end.budget', () => clearInterval(simBudget));
+
+  // Deferred cycle detection: runs after first paint, then enhances edges.
+  setTimeout(() => {
+    try {
+      const found = findCycles(nodes, links);
+      cycleEdgesDeferred = found;
+      found.forEach(e => cycleEdges.add(e));
+      highlightCycleEdges();
+    } catch (_) { /* large graphs: skip cycle highlight */ }
+  }, 0);
 
   function applyCluster(active) {
     if (active) {
@@ -1575,7 +1734,7 @@ function initThree() {
     if (!visibleIds.has(nodeId(l.source)) || !visibleIds.has(nodeId(l.target))) return;
     const src = pos3D[nodeId(l.source)], tgt = pos3D[nodeId(l.target)];
     if (!src || !tgt) return;
-    const srcNode = filteredNodes.find(n => n.id === nodeId(l.source));
+    const srcNode = NODE_INDEX.get(nodeId(l.source));
     const col = groupColor(srcNode?.group ?? 0);
     const geo = new THREE.BufferGeometry().setFromPoints([src, tgt]);
     const mat = new THREE.LineBasicMaterial({ color: new THREE.Color(col), transparent: true, opacity: 0.18 + (l.weight||1)*0.04 });
@@ -1650,7 +1809,7 @@ function buildMatrix(sortBy = 'name') {
   if (TYPE_FILTER.size > 0) {
     modules = modules.filter(n => TYPE_FILTER.has(n.type));
   }
-  const connCount = id => LINKS.filter(l => nodeId(l.source) === id || nodeId(l.target) === id).length;
+  // connCount() uses the ADJ_INDEX built in rebuildVizIndexes().
 
   if (sortBy === 'name') modules.sort((a, b) => a.id.localeCompare(b.id));
   else if (sortBy === 'connections') modules.sort((a, b) => connCount(b.id) - connCount(a.id));
@@ -1719,7 +1878,7 @@ let treemapInit = false;
 let treemapZoomStack = []; // stack of group names for breadcrumb
 
 function buildTreemapData(sizeBy = 'loc') {
-  const connCount = id => LINKS.filter(l => nodeId(l.source) === id || nodeId(l.target) === id).length;
+  // connCount() uses the ADJ_INDEX built in rebuildVizIndexes().
   const dirMap = {};
   NODES.forEach(n => {
     // Apply type filter
@@ -2001,6 +2160,7 @@ function buildInfraGraph() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
+checkVizCdn();
 loadGraph();
 </script>
 </body>
