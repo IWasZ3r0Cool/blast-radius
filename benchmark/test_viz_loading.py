@@ -17,6 +17,7 @@ Measures, for each synthetic graph size:
 
 Exit non-zero if any static check fails.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,7 +47,11 @@ def make_graph(n_nodes: int) -> dict:
         for i in range(n_nodes)
     ]
     links = [
-        {"source": nodes[i % n_nodes]["id"], "target": nodes[(i * 7 + 3) % n_nodes]["id"], "weight": 1 + (i % 3)}
+        {
+            "source": nodes[i % n_nodes]["id"],
+            "target": nodes[(i * 7 + 3) % n_nodes]["id"],
+            "weight": 1 + (i % 3),
+        }
         for i in range(n_nodes * 2)
     ]
     return {"nodes": nodes, "links": links, "meta": {"root": "synthetic/"}}
@@ -107,7 +112,9 @@ def main() -> None:
     repo = Path(__file__).resolve().parent.parent
     html_path = repo / "blastradius" / "static" / "explorer.html"
 
-    print(f"{'nodes':>7} {'links':>7} {'bytes':>9} {'parse_ms':>9} {'old_ms':>9} {'new_ms':>9} speedup")
+    print(
+        f"{'nodes':>7} {'links':>7} {'bytes':>9} {'parse_ms':>9} {'old_ms':>9} {'new_ms':>9} speedup"
+    )
     print("-" * 70)
     for size in [int(s) for s in args.sizes.split(",") if s.strip()]:
         data = make_graph(size)
@@ -117,7 +124,9 @@ def main() -> None:
         parse_ms = (time.perf_counter() - t0) * 1000.0
         old_ms, new_ms = bench_lookups(data)
         speedup = old_ms / new_ms if new_ms > 0 else float("inf")
-        print(f"{size:>7} {len(data['links']):>7} {len(payload):>9} {parse_ms:>9.1f} {old_ms:>9.1f} {new_ms:>9.1f} {speedup:>6.1f}x")
+        print(
+            f"{size:>7} {len(data['links']):>7} {len(payload):>9} {parse_ms:>9.1f} {old_ms:>9.1f} {new_ms:>9.1f} {speedup:>6.1f}x"
+        )
 
     print("\n-- explorer.html static checks --")
     results = check_html(html_path)
@@ -127,7 +136,10 @@ def main() -> None:
         if not ok:
             failed += 1
     if failed:
-        print(f"\n{failed} static check(s) missing — implement the loading plan.", file=sys.stderr)
+        print(
+            f"\n{failed} static check(s) missing — implement the loading plan.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     print("\nAll viz loading checks passed.")
 
