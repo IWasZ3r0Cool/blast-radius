@@ -185,9 +185,7 @@ def build(repo_path: str, output: Path | None = None) -> dict:
 
     data["meta"]["indexed"] = True
 
-    # Attach content hashes before DB sync (used for future incremental detection)
-    for node in data["nodes"]:
-        node["content_hash"] = _content_hash(root, node["id"])
+    
 
     # Detect changed file set for informational logging
     db_path = db_path_for(root)
@@ -225,10 +223,7 @@ def build(repo_path: str, output: Path | None = None) -> dict:
         # Embed new symbols if an embedding endpoint is configured
         _embed_new_symbols(store)
 
-    # Remove content_hash from in-memory data before JSON export to keep
-    # the public schema unchanged.
-    for node in data["nodes"]:
-        node.pop("content_hash", None)
+    
 
     dest = output or (root / INDEX_FILENAME)
     dest.write_text(json.dumps(data, indent=2))

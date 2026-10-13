@@ -12,6 +12,7 @@ import re
 import sqlite3
 import struct
 import sys
+import hashlib  # noqa: S405 — required for content-hash computation in sync()
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -235,6 +236,17 @@ class Store:
 
         for node in data["nodes"]:
             path = node["id"]
+            # Lazy content-hash computation (moved from index.py:_build()).
+            # If not pre-computed, derive from repo root + file path.
+            if "content_hash" not in node:
+                repo_root = Path(self.get_meta("repo_root") or "")
+                rel_path = path
+                try:
+                    h = hashlib.sha256((repo_root / rel_path).read_bytes()).hexdigest()[:16]
+                except (OSError, IsADirectoryError):
+                    h = None
+                node["content_hash"] = h  # set for SQL upsert below
+
             imports = node.get("imports", [])
             imports_count = (
                 len(imports) if isinstance(imports, list) else int(imports or 0)
