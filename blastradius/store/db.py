@@ -245,7 +245,7 @@ class Store:
                     h = hashlib.sha256((repo_root / rel_path).read_bytes()).hexdigest()[:16]
                 except (OSError, IsADirectoryError):
                     h = None
-                node["content_hash"] = h  # set for SQL upsert below
+                content_hash = h  # use this local value for SQL upsert below; do not add to node dict
 
             imports = node.get("imports", [])
             imports_count = (
