@@ -238,14 +238,17 @@ class Store:
             path = node["id"]
             # Lazy content-hash computation (moved from index.py:_build()).
             # If not pre-computed, derive from repo root + file path.
+            content_hash = node.get("content_hash")
             if "content_hash" not in node:
                 repo_root = Path(self.get_meta("repo_root") or "")
-                rel_path = path
                 try:
-                    h = hashlib.sha256((repo_root / rel_path).read_bytes()).hexdigest()[:16]
+                    content_hash = hashlib.sha256(
+                        (repo_root / path).read_bytes()
+                    ).hexdigest()[:16]
                 except (OSError, IsADirectoryError):
-                    h = None
-                content_hash = h  # use this local value for SQL upsert below; do not add to node dict
+                    content_hash = None
+
+             # Use content_hash, rather than node.get("content_hash"), in both SQL bindings below. 
 
             imports = node.get("imports", [])
             imports_count = (
