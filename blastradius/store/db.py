@@ -8,11 +8,11 @@ Dependency rule: this module must not import from blastradius.graph or
 blastradius.semantic. The dependency arrow points only upward into this layer.
 """
 
+import hashlib
 import re
 import sqlite3
 import struct
 import sys
-import hashlib  # noqa: S405 — required for content-hash computation in sync()
 from datetime import datetime, timezone
 from pathlib import Path
 
