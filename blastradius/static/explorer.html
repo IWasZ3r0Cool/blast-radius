@@ -1175,6 +1175,7 @@ async function loadGraph() {
   if (typeof d3 === 'undefined') {
     // CDN blocked: banner is already visible via checkVizCdn(); don't hang.
     setVizProgress(100, 'CDN UNAVAILABLE');
+    overlay.classList.add('hidden');
     return;
   }
   // Re-init all rendered views

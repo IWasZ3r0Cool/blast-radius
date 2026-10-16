@@ -116,6 +116,23 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _content_hash(repo_root: Path | None, file_id: str) -> str | None:
+    """Hash a regular file only when its resolved path stays inside the repository."""
+    if repo_root is None:
+        return None
+    try:
+        path = Path(file_id)
+        if path.anchor:
+            return None
+        target = (repo_root / path).resolve()
+        target.relative_to(repo_root)
+        if not target.is_file():
+            return None
+        return hashlib.sha256(target.read_bytes()).hexdigest()[:16]
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
 class Store:
     """Persistent graph store backed by SQLite.
 
@@ -234,21 +251,23 @@ class Store:
         seen_file_ids: list[int] = []
         node_id_map: dict[str, int] = {}  # path -> rowid
 
+        repo_root = None
+        root_value = self.get_meta("repo_root")
+        if root_value:
+            try:
+                root = Path(root_value)
+                if root.is_absolute():
+                    root = root.resolve(strict=True)
+                    if root.is_dir():
+                        repo_root = root
+            except (OSError, RuntimeError, ValueError):
+                pass
+
         for node in data["nodes"]:
             path = node["id"]
-            # Lazy content-hash computation (moved from index.py:_build()).
-            # If not pre-computed, derive from repo root + file path.
             content_hash = node.get("content_hash")
             if "content_hash" not in node:
-                repo_root = Path(self.get_meta("repo_root") or "")
-                try:
-                    content_hash = hashlib.sha256(
-                        (repo_root / path).read_bytes()
-                    ).hexdigest()[:16]
-                except (OSError, IsADirectoryError):
-                    content_hash = None
-
-             # Use content_hash, rather than node.get("content_hash"), in both SQL bindings below. 
+                content_hash = _content_hash(repo_root, path)
 
             imports = node.get("imports", [])
             imports_count = (

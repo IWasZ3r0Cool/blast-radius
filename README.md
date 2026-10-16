@@ -217,6 +217,11 @@ blastradius impact FILE [--index PATH] [--out FILE] [--json] [--as-of REF]
 
 Shows the blast-radius impact for a specific file: direct dependents, transitive dependents, blast score, and risk level.
 
+Exact indexed paths, including a leading `./`, take priority. Shortened or suffix
+paths must identify one file; ambiguous matches list the candidates and exit with
+status 1. Use an exact repo-relative path to select a file. This also applies to
+historical queries with `--as-of`.
+
 ```
 Impact: src/auth.py
 Blast Score: 8.5  (2 direct · 7 transitive)  [HIGH]
@@ -495,6 +500,10 @@ blastradius dependencies FILE [--index PATH] [--json]
 ```
 
 Shows what a file imports and what imports it, plus its blast score.
+
+File selection follows the same rules as `impact`: exact paths take priority,
+and ambiguous suffix matches list the candidates and exit with status 1. Use an
+exact repo-relative path to select a file.
 
 ```
 $ blastradius dependencies src/auth.py

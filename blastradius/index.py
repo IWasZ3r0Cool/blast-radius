@@ -9,7 +9,6 @@ Phase-1 change: build() now also syncs graph data to a SQLite store at
 consumers keep working without modification.
 """
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -127,14 +126,6 @@ def git_resolve(root: Path, ref: str) -> str | None:
         return None
 
 
-def _content_hash(root: Path, rel_path: str) -> str | None:
-    p = root / rel_path
-    try:
-        return hashlib.sha256(p.read_bytes()).hexdigest()[:16]
-    except (OSError, IsADirectoryError):
-        return None
-
-
 def _embed_new_symbols(store) -> None:
     """Embed symbols that lack a vector entry, if an embedding endpoint is configured.
 
@@ -185,8 +176,6 @@ def build(repo_path: str, output: Path | None = None) -> dict:
 
     data["meta"]["indexed"] = True
 
-    
-
     # Detect changed file set for informational logging
     db_path = db_path_for(root)
     head_commit = _git_head(root)
@@ -222,8 +211,6 @@ def build(repo_path: str, output: Path | None = None) -> dict:
 
         # Embed new symbols if an embedding endpoint is configured
         _embed_new_symbols(store)
-
-    
 
     dest = output or (root / INDEX_FILENAME)
     dest.write_text(json.dumps(data, indent=2))
