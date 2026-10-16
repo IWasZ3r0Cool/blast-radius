@@ -12,9 +12,14 @@ Acceptance criteria (from CKG-DESIGN-001):
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
+
+from blastradius.cli import _build_parser, _cmd_impact
 
 FIXTURE_SRC = Path(__file__).parent / "fixtures" / "simple_python"
 
@@ -80,6 +85,179 @@ def _make_temporal_repo(tmp_path: Path) -> tuple[Path, str, str, str]:
     _run_analyze(repo)
 
     return repo, c1, c2, c3
+
+
+@pytest.fixture(scope="module")
+def impact_repo(tmp_path_factory):
+    return _make_temporal_repo(tmp_path_factory.mktemp("impact_cli"))
+
+
+@pytest.mark.parametrize("historical", [False, True], ids=["head", "historical"])
+@pytest.mark.parametrize("path_kind", ["exact", "prefixed", "absolute"])
+def test_impact_cli_resolves_paths(
+    impact_repo, monkeypatch, capsys, historical, path_kind
+):
+    repo, _c1, c2, _c3 = impact_repo
+    monkeypatch.chdir(repo)
+    file_path = {
+        "exact": "b.py",
+        "prefixed": "./b.py",
+        "absolute": str(repo / "b.py"),
+    }[path_kind]
+    argv = ["impact", file_path, "--json"]
+    if historical:
+        argv.extend(["--as-of", c2])
+    capsys.readouterr()
+
+    _cmd_impact(_build_parser().parse_args(argv))
+
+    captured = capsys.readouterr()
+    expected = {
+        "file": "b.py",
+        "blast_score": 1.0 if historical else 0.0,
+        "direct_dependents": 1 if historical else 0,
+        "transitive_dependents": 0,
+        "direct_ids": ["a.py"] if historical else [],
+        "transitive_ids": [],
+    }
+    if historical:
+        expected["as_of"] = c2
+    assert json.loads(captured.out) == expected
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("historical", [False, True], ids=["head", "historical"])
+def test_impact_cli_text_output(impact_repo, monkeypatch, capsys, historical):
+    repo, _c1, c2, _c3 = impact_repo
+    monkeypatch.chdir(repo)
+    argv = ["impact", "./b.py"]
+    if historical:
+        argv.extend(["--as-of", c2])
+    capsys.readouterr()
+
+    _cmd_impact(_build_parser().parse_args(argv))
+
+    captured = capsys.readouterr()
+    if historical:
+        assert captured.out == (
+            f"[as-of {c2[:12]}]  Impact: b.py\n"
+            "Blast Score: 1.0  (1 direct · 0 transitive)  [CRITICAL]\n\n"
+            "Direct dependents (1)\n  a.py\n\n"
+            "Risk: CRITICAL — affects 1/2 files (50.0% of codebase)\n"
+        )
+    else:
+        assert captured.out == (
+            "Impact: b.py\n"
+            "Blast Score: 0.0  (0 direct · 0 transitive)  [LOW]\n\n"
+            "Risk: LOW — affects 0/2 files (0.0% of codebase)\n"
+        )
+    assert captured.err == ""
+
+
+def test_impact_cli_writes_markdown(impact_repo, tmp_path, monkeypatch, capsys):
+    repo, _c1, _c2, _c3 = impact_repo
+    monkeypatch.chdir(repo)
+    report = tmp_path / "impact.md"
+    args = _build_parser().parse_args(["impact", "./b.py", "--out", str(report)])
+    capsys.readouterr()
+
+    _cmd_impact(args)
+
+    captured = capsys.readouterr()
+    assert captured.out == f"Impact report written to {report}\n"
+    assert captured.err == ""
+    markdown = report.read_text()
+    assert markdown.startswith("# Impact Report: `b.py`\n")
+    assert "| Direct dependents | 0 |" in markdown
+    assert "| Transitive dependents | 0 |" in markdown
+    assert "could affect **0/2** files" in markdown
+
+
+@pytest.mark.parametrize("historical", [False, True], ids=["head", "historical"])
+def test_impact_cli_missing_file(impact_repo, monkeypatch, capsys, historical):
+    repo, _c1, c2, _c3 = impact_repo
+    monkeypatch.chdir(repo)
+    argv = ["impact", "missing.py"]
+    if historical:
+        argv.extend(["--as-of", c2])
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit) as error:
+        _cmd_impact(_build_parser().parse_args(argv))
+
+    assert error.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    expected = "File not found in index: missing.py\n"
+    if not historical:
+        expected += "Available nodes (first 20):\n  a.py\n  b.py\n"
+    assert captured.err == expected
+
+
+def test_impact_cli_limits_available_nodes(tmp_path, capsys):
+    graph = tmp_path / "graph.json"
+    graph.write_text(
+        json.dumps(
+            {
+                "nodes": [{"id": f"module{i:02}.py"} for i in range(24, -1, -1)],
+                "links": [],
+            }
+        )
+    )
+    args = _build_parser().parse_args(["impact", "missing.py", "--index", str(graph)])
+
+    with pytest.raises(SystemExit) as error:
+        _cmd_impact(args)
+
+    assert error.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.splitlines() == [
+        "File not found in index: missing.py",
+        "Available nodes (first 20):",
+        *[f"  module{i:02}.py" for i in range(20)],
+    ]
+
+
+def test_impact_cli_uses_explicit_index(impact_repo, tmp_path, monkeypatch, capsys):
+    repo, _c1, _c2, _c3 = impact_repo
+    monkeypatch.chdir(tmp_path)
+    data = json.loads((repo / "blastradius.json").read_text())
+    data["links"] = [{"source": "a.py", "target": "b.py", "kind": "imports"}]
+    graph = tmp_path / "export.json"
+    graph.write_text(json.dumps(data))
+    args = _build_parser().parse_args(
+        ["impact", str(repo / "b.py"), "--index", str(graph), "--json"]
+    )
+    capsys.readouterr()
+
+    _cmd_impact(args)
+
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["file"] == "b.py"
+    assert result["direct_ids"] == ["a.py"]
+    assert result["direct_dependents"] == 1
+    assert captured.err == ""
+
+
+def test_impact_cli_resolves_historically_present_file(tmp_path, monkeypatch, capsys):
+    repo, _c1, c2, _c3 = _make_temporal_repo(tmp_path)
+    _git(repo, "rm", "b.py")
+    _commit_all(repo, "remove b")
+    _run_analyze(repo)
+    monkeypatch.chdir(repo)
+    args = _build_parser().parse_args(["impact", "./b.py", "--as-of", c2, "--json"])
+    capsys.readouterr()
+
+    _cmd_impact(args)
+
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["file"] == "b.py"
+    assert result["direct_ids"] == ["a.py"]
+    assert result["direct_dependents"] == 1
+    assert captured.err == ""
 
 
 # ── Test 1: as_of_impact differs between C2 and HEAD ─────────────────────────

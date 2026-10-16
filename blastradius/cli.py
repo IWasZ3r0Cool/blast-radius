@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Collection
 from pathlib import Path
 
 
@@ -83,6 +84,20 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         build(repo, output)
 
 
+def _resolve_impact_file_id(
+    file_path: str,
+    candidate_ids: Collection[str],
+) -> str | None:
+    """Prefer an exact ID, then the first match using the CLI's legacy suffix rules."""
+    if file_path in candidate_ids:
+        return file_path
+    clean = file_path.lstrip("./")
+    for candidate in candidate_ids:
+        if candidate.endswith(clean) or clean.endswith(candidate):
+            return candidate
+    return None
+
+
 def _cmd_impact(args: argparse.Namespace) -> None:
     from blastradius.impact import compute_blast_radius
     from blastradius.index import (
@@ -130,18 +145,10 @@ def _cmd_impact(args: argparse.Namespace) -> None:
 
         # Resolve file_id (may be relative or absolute)
         fp = args.file
-        clean = fp.lstrip("./")
         all_paths = [
             r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()
         ]
-        file_id = None
-        if fp in all_paths:
-            file_id = fp
-        else:
-            for p in all_paths:
-                if p.endswith(clean) or clean.endswith(p):
-                    file_id = p
-                    break
+        file_id = _resolve_impact_file_id(fp, all_paths)
 
         if not file_id:
             print(f"File not found in index: {fp}", file=sys.stderr)
@@ -197,15 +204,7 @@ def _cmd_impact(args: argparse.Namespace) -> None:
     node_ids = {n["id"] for n in data["nodes"]}
 
     fp = args.file
-    file_id = None
-    if fp in node_ids:
-        file_id = fp
-    else:
-        clean = fp.lstrip("./")
-        for nid in node_ids:
-            if nid.endswith(clean) or clean.endswith(nid):
-                file_id = nid
-                break
+    file_id = _resolve_impact_file_id(fp, node_ids)
 
     if not file_id:
         print(f"File not found in index: {fp}", file=sys.stderr)
