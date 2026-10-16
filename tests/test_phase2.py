@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -90,6 +91,108 @@ def _make_temporal_repo(tmp_path: Path) -> tuple[Path, str, str, str]:
 @pytest.fixture(scope="module")
 def impact_repo(tmp_path_factory):
     return _make_temporal_repo(tmp_path_factory.mktemp("impact_cli"))
+
+
+@pytest.fixture(scope="module")
+def ambiguous_impact_repo(tmp_path_factory):
+    repo = tmp_path_factory.mktemp("ambiguous_impact_cli")
+    _setup_git(repo)
+    for directory in ("left", "longer"):
+        (repo / directory).mkdir()
+        (repo / directory / "same.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "entry.py").write_text("from left.same import VALUE\n", encoding="utf-8")
+    commit = _commit_all(repo, "ambiguous file names")
+    _run_analyze(repo)
+    return repo, commit
+
+
+@pytest.mark.parametrize("mode", ["text", "json", "report"])
+def test_temporal_impact_ambiguity_closes_store(
+    ambiguous_impact_repo, tmp_path, monkeypatch, capsys, mode
+):
+    from blastradius.store import Store
+
+    repo, commit = ambiguous_impact_repo
+    monkeypatch.chdir(repo)
+    closed = []
+    close = Store.close
+
+    def record_close(store):
+        close(store)
+        closed.append(store)
+
+    monkeypatch.setattr(Store, "close", record_close)
+    report = tmp_path / "impact.md"
+    argv = ["impact", "same.py", "--as-of", commit]
+    if mode == "json":
+        argv.append("--json")
+    elif mode == "report":
+        argv.extend(["--out", str(report)])
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as error:
+        _cmd_impact(_build_parser().parse_args(argv))
+    assert error.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "Ambiguous file same.py: left/same.py, longer/same.py; "
+        "use an exact repo-relative path\n"
+    )
+    assert not report.exists()
+    assert len(closed) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        closed[0]._conn.execute("SELECT 1")
+
+
+@pytest.mark.parametrize("file_path", ["left/same.py", "./left/same.py"])
+def test_temporal_impact_accepts_explicit_ambiguous_file(
+    ambiguous_impact_repo, monkeypatch, capsys, file_path
+):
+    repo, commit = ambiguous_impact_repo
+    monkeypatch.chdir(repo)
+    capsys.readouterr()
+    _cmd_impact(
+        _build_parser().parse_args(["impact", file_path, "--as-of", commit, "--json"])
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["file"] == "left/same.py"
+    assert result["direct_ids"] == ["entry.py"]
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("failure", ["ref", "file"])
+def test_temporal_impact_early_error_closes_store(
+    ambiguous_impact_repo, monkeypatch, capsys, failure
+):
+    from blastradius.store import Store
+
+    repo, commit = ambiguous_impact_repo
+    monkeypatch.chdir(repo)
+    closed = []
+    close = Store.close
+
+    def record_close(store):
+        close(store)
+        closed.append(store)
+
+    monkeypatch.setattr(Store, "close", record_close)
+    file_path = "left/same.py" if failure == "ref" else "missing.py"
+    ref = "no-such-ref" if failure == "ref" else commit
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as error:
+        _cmd_impact(_build_parser().parse_args(["impact", file_path, "--as-of", ref]))
+    assert error.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "Could not resolve ref: no-such-ref\n"
+        if failure == "ref"
+        else "File not found in index: missing.py\n"
+    )
+    assert len(closed) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        closed[0]._conn.execute("SELECT 1")
 
 
 @pytest.mark.parametrize("historical", [False, True], ids=["head", "historical"])
