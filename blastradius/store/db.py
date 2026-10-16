@@ -8,6 +8,7 @@ Dependency rule: this module must not import from blastradius.graph or
 blastradius.semantic. The dependency arrow points only upward into this layer.
 """
 
+import hashlib
 import re
 import sqlite3
 import struct
@@ -235,6 +236,20 @@ class Store:
 
         for node in data["nodes"]:
             path = node["id"]
+            # Lazy content-hash computation (moved from index.py:_build()).
+            # If not pre-computed, derive from repo root + file path.
+            content_hash = node.get("content_hash")
+            if "content_hash" not in node:
+                repo_root = Path(self.get_meta("repo_root") or "")
+                try:
+                    content_hash = hashlib.sha256(
+                        (repo_root / path).read_bytes()
+                    ).hexdigest()[:16]
+                except (OSError, IsADirectoryError):
+                    content_hash = None
+
+             # Use content_hash, rather than node.get("content_hash"), in both SQL bindings below. 
+
             imports = node.get("imports", [])
             imports_count = (
                 len(imports) if isinstance(imports, list) else int(imports or 0)
@@ -262,7 +277,7 @@ class Store:
                         node.get("group", 0),
                         imports_count,
                         node.get("package"),
-                        node.get("content_hash"),
+                        content_hash,
                         node.get("blast_score", 0.0),
                         node.get("direct_dependents", 0),
                         node.get("transitive_dependents", 0),
@@ -290,7 +305,7 @@ class Store:
                         node.get("group", 0),
                         imports_count,
                         node.get("package"),
-                        node.get("content_hash"),
+                        content_hash,
                         node.get("blast_score", 0.0),
                         node.get("direct_dependents", 0),
                         node.get("transitive_dependents", 0),
