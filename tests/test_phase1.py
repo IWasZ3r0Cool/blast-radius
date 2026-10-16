@@ -112,6 +112,7 @@ def test_db_populated(tmp_path: Path) -> None:
     _init_git(repo)
 
     data = _run_analyze(repo)
+    assert all("content_hash" not in node for node in data["nodes"])
 
     db_path = db_path_for(repo)
     assert db_path.exists(), ".blastradius/index.db not created"
