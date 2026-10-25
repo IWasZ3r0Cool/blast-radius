@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Collection
+from contextlib import closing
 from pathlib import Path
 
 
@@ -83,6 +85,32 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         build(repo, output)
 
 
+def _resolve_cli_file_id(
+    file_path: str,
+    candidate_ids: Collection[str],
+) -> str | None:
+    """Prefer exact IDs; accept legacy suffix matches only when unambiguous."""
+    if file_path in candidate_ids:
+        return file_path
+    normalized = file_path
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    if normalized in candidate_ids:
+        return normalized
+    clean = file_path.lstrip("./")
+    matches = {
+        candidate
+        for candidate in candidate_ids
+        if candidate.endswith(clean) or clean.endswith(candidate)
+    }
+    if len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous file {file_path}: {', '.join(sorted(matches))}; "
+            "use an exact repo-relative path"
+        )
+    return next(iter(matches), None)
+
+
 def _cmd_impact(args: argparse.Namespace) -> None:
     from blastradius.impact import compute_blast_radius
     from blastradius.index import (
@@ -113,42 +141,37 @@ def _cmd_impact(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-        # Resolve repo root from DB meta
-        store = Store(db_path)
-        repo_root_str = store.get_meta("repo_root")
-        repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
+        with closing(Store(db_path)) as store:
+            # Resolve repo root from DB meta
+            repo_root_str = store.get_meta("repo_root")
+            repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
 
-        full_hash = git_resolve(repo_root, as_of)
-        if not full_hash:
-            print(f"Could not resolve ref: {as_of}", file=sys.stderr)
-            sys.exit(1)
+            full_hash = git_resolve(repo_root, as_of)
+            if not full_hash:
+                print(f"Could not resolve ref: {as_of}", file=sys.stderr)
+                sys.exit(1)
 
-        reachable = git_reachable(repo_root, full_hash)
-        if not reachable:
-            print(f"No commits reachable from {as_of}", file=sys.stderr)
-            sys.exit(1)
+            reachable = git_reachable(repo_root, full_hash)
+            if not reachable:
+                print(f"No commits reachable from {as_of}", file=sys.stderr)
+                sys.exit(1)
 
-        # Resolve file_id (may be relative or absolute)
-        fp = args.file
-        clean = fp.lstrip("./")
-        all_paths = [
-            r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()
-        ]
-        file_id = None
-        if fp in all_paths:
-            file_id = fp
-        else:
-            for p in all_paths:
-                if p.endswith(clean) or clean.endswith(p):
-                    file_id = p
-                    break
+            # Resolve file_id (may be relative or absolute)
+            fp = args.file
+            all_paths = [
+                r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()
+            ]
+            try:
+                file_id = _resolve_cli_file_id(fp, all_paths)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                sys.exit(1)
 
-        if not file_id:
-            print(f"File not found in index: {fp}", file=sys.stderr)
-            sys.exit(1)
+            if not file_id:
+                print(f"File not found in index: {fp}", file=sys.stderr)
+                sys.exit(1)
 
-        blast = store.as_of_impact(file_id, reachable)
-        store.close()
+            blast = store.as_of_impact(file_id, reachable)
 
         if blast is None:
             print(
@@ -197,15 +220,11 @@ def _cmd_impact(args: argparse.Namespace) -> None:
     node_ids = {n["id"] for n in data["nodes"]}
 
     fp = args.file
-    file_id = None
-    if fp in node_ids:
-        file_id = fp
-    else:
-        clean = fp.lstrip("./")
-        for nid in node_ids:
-            if nid.endswith(clean) or clean.endswith(nid):
-                file_id = nid
-                break
+    try:
+        file_id = _resolve_cli_file_id(fp, node_ids)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
 
     if not file_id:
         print(f"File not found in index: {fp}", file=sys.stderr)
@@ -378,18 +397,16 @@ def _cmd_dependencies(args: argparse.Namespace) -> None:
             sys.exit(1)
     data = load(index_path)
     fp = args.file
-    clean = fp.lstrip("./")
-    node = next(
-        (
-            n
-            for n in data["nodes"]
-            if n["id"] == fp or n["id"].endswith(clean) or clean.endswith(n["id"])
-        ),
-        None,
-    )
-    if not node:
+    nodes_by_id = {node["id"]: node for node in data["nodes"]}
+    try:
+        file_id = _resolve_cli_file_id(fp, nodes_by_id)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+    if not file_id:
         print(f"File not found in index: {fp}", file=sys.stderr)
         sys.exit(1)
+    node = nodes_by_id[file_id]
     if args.json:
         print(
             json.dumps(
