@@ -931,3 +931,38 @@ def test_failed_index_write_releases_database_and_server_recovers(tmp_path, repo
         assert "fixture write failure" in response["result"]["content"][0]["text"]
         assert payload(client.call_tool("graph_query", {"file": "models.py"}))["nodes"]
     assert "ResourceWarning" not in "".join(client.stderr)
+
+
+def test_lookup_symbol_impact(tmp_path):
+    repo = tmp_path / "impact-repo"
+    repo.mkdir()
+    (repo / "auth.py").write_text("def validate():\n    return True\n")
+    (repo / "api.py").write_text(
+        "from auth import validate as check\ndef route():\n    return check()\n"
+    )
+    (repo / "unused.py").write_text("from auth import validate\n")
+    with launch(tmp_path, "--repo", repo) as client:
+        client.initialize()
+        payload(client.call_tool("analyze_repo", {"repo_path": "."}))
+        result = payload(
+            client.call_tool(
+                "lookup_symbol",
+                {
+                    "name": "validate",
+                    "include_impact": True,
+                    "file_path": str(repo / "auth.py"),
+                },
+            )
+        )
+        impact = result["matches"][0]["impact"]
+        assert impact["direct_ids"] == ["api.py"]
+        assert impact["blast_score"] == 1
+        assert impact["importers"][0]["references"][0]["symbol"] == "route"
+        assert (
+            payload(
+                client.call_tool(
+                    "lookup_symbol", {"name": "absent", "include_impact": True}
+                )
+            )["found"]
+            is False
+        )

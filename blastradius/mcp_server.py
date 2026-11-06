@@ -115,6 +115,18 @@ TOOLS = [
                     "type": "string",
                     "description": "Exact symbol name to look up.",
                 },
+                "include_impact": {
+                    "type": "boolean",
+                    "description": "Include static per-symbol usage, caller locations and blast score (requires SQLite index and source files).",
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Optional defining file to disambiguate same-name symbols when include_impact is true.",
+                },
+                "db_path": {
+                    "type": "string",
+                    "description": "SQLite index for include_impact; relative to the configured repository.",
+                },
                 "symbol_index_path": {
                     "type": "string",
                     "description": "Path to symbolindex.json. Auto-discovered if omitted.",
@@ -321,6 +333,23 @@ def _call_get_high_blast_files(params: dict, artifacts: Artifacts) -> dict:
 
 def _call_lookup_symbol(params: dict, artifacts: Artifacts) -> dict:
     name = params["name"]
+    if params.get("include_impact", False):
+        from blastradius.symbol_impact import symbol_impact
+
+        if params.get("symbol_index_path") is not None:
+            raise ValueError("include_impact uses SQLite; select db_path instead of symbol_index_path")
+        store = artifacts.database(params.get("db_path"))
+        root = artifacts.repository(store, params.get("db_path"))
+        matches = store.lookup_by_name(name)
+        if params.get("file_path") is not None:
+            paths = [r[0] for r in store._conn.execute("SELECT path FROM files WHERE active=1")]
+            file_id = resolve_file_id(params["file_path"], paths, root)
+            if file_id is None:
+                raise ValueError(f"File not found in active index: {params['file_path']}")
+            matches = [m for m in matches if m["file"] == file_id]
+        for match in matches:
+            match["impact"] = symbol_impact(store, root, match["file"], name)
+        return {"found": bool(matches), "name": name, "matches": matches}
     matches = []
     explicit = params.get("symbol_index_path")
 

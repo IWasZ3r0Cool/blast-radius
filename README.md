@@ -437,7 +437,7 @@ responses; an already-running synchronous write finishes safely, without rollbac
 | `get_dependencies` | imports + imported-by for a file |
 | `get_high_blast_files` | All files above a blast score threshold |
 | `build_symbol_index` | Build or refresh the symbol index |
-| `lookup_symbol` | Find where any function/class/type is defined (file + line) |
+| `lookup_symbol` | Find symbol definitions; optionally include per-symbol impact with `include_impact: true` |
 | `semantic_search` | Hybrid semantic + keyword + graph symbol search; degrades gracefully without embeddings |
 | `temporal_impact` | Blast-radius at a historical commit/ref (`as_of` parameter) |
 | `graph_query` | k-hop dependency neighborhood of a file (`dependents`/`dependencies`/`both`) |
@@ -942,3 +942,34 @@ Without these env vars, `blastradius search` and the `semantic_search` MCP tool 
 ## License
 
 Apache 2.0 — free to use and build on; attribution required in derivative works and documentation. Copyright 2026 David Scheiderman.
+
+### Per-symbol impact for editor agents
+
+After `blastradius analyze`, call the MCP tool:
+
+```json
+{"name": "validate_token", "include_impact": true, "file_path": "auth.py"}
+```
+
+`file_path` optionally selects a defining file when several symbols share a name;
+`db_path` optionally selects the SQLite index. Each matching definition includes
+`impact.importers`, with `imports_symbol`, `usage` (`referenced`, `unused`, or
+`unknown`), and reference locations (`line`, zero-based `column`, enclosing `symbol`).
+The importer list includes all files importing the defining module, so imports
+of other exports can be distinguished from imports of the requested symbol.
+
+Python named imports, aliases, module-qualified references, and relative imports
+are analyzed with the AST. Comments, strings, and the import declaration itself
+do not count as references. Wildcards, conditional imports, shadowed bindings,
+unreadable sources, and other languages return unknown usage. This is static
+reference analysis: a reference does not prove execution or reachability, and
+annotations may count as references. Dynamic imports and re-export chains are
+not resolved. Source files reflect the current working tree; rebuild the index
+after structural changes.
+
+`direct_ids` contains importers with references. `transitive_ids` follows file
+import edges from those importers, excluding the definition and direct files.
+The score is `len(direct_ids) + 0.5 * len(transitive_ids)`. Unknown usage is
+excluded, and `complete: false` flags unknown importer analysis. Transitive
+results are conservative file dependencies, not a function call graph. The
+original `lookup_symbol` behavior is preserved when `include_impact` is omitted.
