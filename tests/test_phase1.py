@@ -126,7 +126,9 @@ def test_db_populated(tmp_path: Path) -> None:
         f"DB has {status['active_files']} active files; expected {expected_files}"
     )
     assert status["active_edges"] >= 0
-    assert status["schema_version"] == "3"
+    from blastradius.store.db import SCHEMA_VERSION
+
+    assert status["schema_version"] == SCHEMA_VERSION
 
 
 # ── Test 3: incremental detection logs changed file ──────────────────────────

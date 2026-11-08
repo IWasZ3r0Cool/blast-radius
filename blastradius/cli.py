@@ -158,9 +158,15 @@ def _cmd_impact(args: argparse.Namespace) -> None:
 
             # Resolve file_id (may be relative or absolute)
             fp = args.file
-            all_paths = [
-                r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()
-            ]
+            snapshot_paths = store.snapshot_paths(full_hash)
+            all_paths = (
+                snapshot_paths
+                if snapshot_paths is not None
+                else [
+                    r[0]
+                    for r in store._conn.execute("SELECT path FROM files").fetchall()
+                ]
+            )
             try:
                 file_id = _resolve_cli_file_id(fp, all_paths)
             except ValueError as exc:
@@ -171,7 +177,7 @@ def _cmd_impact(args: argparse.Namespace) -> None:
                 print(f"File not found in index: {fp}", file=sys.stderr)
                 sys.exit(1)
 
-            blast = store.as_of_impact(file_id, reachable)
+            blast = store.as_of_impact(file_id, reachable, commit_hash=full_hash)
 
         if blast is None:
             print(

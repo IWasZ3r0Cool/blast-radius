@@ -18,7 +18,8 @@ Point it at any project — Python, JavaScript/TypeScript, Go, Ruby, Rust, Java,
 - An interactive visualization UI (2D/3D graphs, dependency matrix, treemap)
 
 No project build step or npm required. SQLite is stdlib; the default installation
-includes the official Python MCP SDK and its runtime dependencies.
+includes the official Python MCP SDK, Python Tree-sitter bindings and JS/TS
+grammars, and JSON5 configuration parsing.
 
 ---
 
@@ -294,9 +295,45 @@ blastradius search "token validation" --as-of v1.2.0
 blastradius history [REPO_PATH] [--since REF] [--max-commits N] [--json]
 ```
 
-Backfills temporal graph data from git history — without any working-tree checkouts. Reads blobs via `git cat-file --batch` and stamps `first_seen_commit` / `last_seen_commit` on every file, edge, and symbol.
+Backfills dependency snapshots from Git history without working-tree checkouts.
+It reads source and configuration bytes through `git cat-file --batch`, caches
+source parsing, and resolves imports against each commit's own file inventory.
+Adding a target or changing aliases therefore updates dependencies even when
+the importer is unchanged. Identical graphs share snapshot storage.
 
-Run this once after initial setup to enable `--as-of` queries across the full history.
+Historical import extraction covers **Python and JavaScript/TypeScript/Vue**.
+Python resolution includes relative imports, named child modules, package
+initializers, and conventional `src/` layouts. JS/TS uses syntax parsing for
+imports, reexports, and literal `require()`/dynamic imports; it supports local
+TS/JS configuration aliases, local `extends`, and repository-local package
+`imports`/`exports`. Conditional package mappings include all declared local
+variants, including type declarations. This is a conservative dependency graph
+across builds, rather than a compiler or runtime simulation.
+
+Computed imports, installed-package configuration, Python runtime import hooks,
+and generated source/build-output remapping are not resolved. Parse failures,
+unsupported computed imports, and unresolved local mappings produce bounded
+warnings on stderr. Go/Rust history extraction is a separate follow-up; normal
+indexing retains its existing language support. CSS files can be import targets;
+historical CSS-to-CSS extraction is not included.
+
+`impact --as-of` and MCP `temporal_impact` use exact commit membership, so removed
+or reintroduced dependencies and branch histories do not depend on one lifetime
+interval. Clean normal indexes also record commit snapshots. Dirty working-tree
+indexes update the current graph without replacing the committed snapshot.
+
+After upgrading an existing database, run `blastradius history` to populate
+snapshots for historical queries. The default covers at most 1000 commits;
+references outside the processed range require another backfill with appropriate
+bounds. Existing first/last metadata remains available for `changed-since` and
+symbol search; their temporal semantics are unchanged by snapshot storage.
+
+A local Python 3.10 comparison on 202 source files and eight commits measured
+normal indexing at 0.16s (previously 0.25s) and backfill at 0.35s (previously
+0.34s). Historical extraction recovered 200 edges versus 100 previously; the
+missed edges were JS parent-directory imports. All eight commits shared one
+stored graph because their dependency membership was identical. These small
+synthetic timings are illustrative, not a large-repository performance guarantee.
 
 ```bash
 # Backfill up to 1000 commits (default)
@@ -882,8 +919,9 @@ Kind abbreviations: `fn` function · `cls` class · `st` struct · `en` enum · 
 
 ## Optional dependencies
 
-The MCP SDK, AnyIO, and JSON Schema validation are required runtime dependencies
-installed automatically. The following features remain optional:
+The MCP SDK, AnyIO, JSON Schema validation, Tree-sitter with JS/TS grammars, and
+JSON5 are required runtime dependencies installed automatically. The following
+features remain optional:
 
 | Package | Purpose | Install |
 |---------|---------|---------|

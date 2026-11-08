@@ -119,6 +119,8 @@ def test_windows_python_imports_use_portable_file_ids(tmp_path, windows_relative
     assert {(edge["source"], edge["target"]) for edge in data["links"]} == {
         ("pkg/client.py", "pkg/models.py"),
         ("main.py", "pkg/models.py"),
+        ("pkg/client.py", "pkg/__init__.py"),
+        ("main.py", "pkg/__init__.py"),
     }
 
 

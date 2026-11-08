@@ -46,6 +46,42 @@ def _git_head(root: Path) -> str | None:
         return None
 
 
+def _snapshot_matches_head(root: Path) -> bool:
+    """Never label an uncommitted working graph as the exact HEAD graph."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            timeout=30,
+            check=False,
+        )
+        if result.returncode:
+            return False
+        entries = iter(result.stdout.split("\0"))
+        for entry in entries:
+            if not entry:
+                continue
+            paths = [entry[3:]]
+            if "R" in entry[:2] or "C" in entry[:2]:
+                paths.append(next(entries, ""))
+            for path in paths:
+                # Ignore only known outputs. Any other change could affect an
+                # analyzer, including Go/Rust or infrastructure configuration.
+                if path in {INDEX_FILENAME, "symbolindex.json"} or path.startswith(
+                    ".blastradius/"
+                ):
+                    continue
+                return False
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
     """Return repo-relative paths changed between two commits."""
     try:
@@ -179,6 +215,7 @@ def build(repo_path: str, output: Path | None = None) -> dict:
     # Detect changed file set for informational logging
     db_path = db_path_for(root)
     head_commit = _git_head(root)
+    snapshot_matches_head = bool(head_commit) and _snapshot_matches_head(root)
     changed_paths: set | None = None
 
     with closing(Store(db_path)) as store:
@@ -194,7 +231,12 @@ def build(repo_path: str, output: Path | None = None) -> dict:
         elif last_commit is None:
             print("Incremental: first index — full scan", file=sys.stderr)
 
-        store.sync(data, commit=head_commit, changed_paths=changed_paths)
+        store.sync(
+            data,
+            commit=head_commit,
+            changed_paths=changed_paths,
+            snapshot=snapshot_matches_head,
+        )
 
         if head_commit:
             store.set_meta("last_indexed_commit", head_commit)
