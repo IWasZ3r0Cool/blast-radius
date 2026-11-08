@@ -9,6 +9,7 @@ blastradius.semantic. The dependency arrow points only upward into this layer.
 """
 
 import hashlib
+import json
 import re
 import sqlite3
 import struct
@@ -16,7 +17,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 # sqlite-vec is an optional C extension; absence is a graceful degradation, not an error.
 try:
@@ -100,6 +101,27 @@ CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_file_id);
 CREATE INDEX IF NOT EXISTS idx_symbols_name  ON symbols(name);
 CREATE INDEX IF NOT EXISTS idx_symbols_file  ON symbols(file_id);
 CREATE INDEX IF NOT EXISTS idx_files_active  ON files(active);
+
+CREATE TABLE IF NOT EXISTS graph_snapshots (
+    id TEXT PRIMARY KEY,
+    coverage TEXT NOT NULL,
+    extraction_version TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS snapshot_nodes (
+    snapshot_id TEXT NOT NULL REFERENCES graph_snapshots(id),
+    path TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, path)
+);
+CREATE TABLE IF NOT EXISTS snapshot_edges (
+    snapshot_id TEXT NOT NULL REFERENCES graph_snapshots(id),
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, source, target)
+);
+CREATE TABLE IF NOT EXISTS commit_snapshots (
+    commit_hash TEXT PRIMARY KEY,
+    snapshot_id TEXT NOT NULL REFERENCES graph_snapshots(id)
+);
 """
 
 # FTS is created separately because executescript cannot mix DDL and virtual tables
@@ -131,6 +153,14 @@ def _content_hash(repo_root: Path | None, file_id: str) -> str | None:
         return hashlib.sha256(target.read_bytes()).hexdigest()[:16]
     except (OSError, RuntimeError, ValueError):
         return None
+
+
+def _validate_snapshot_edges(nodes: set[str], edges: set[tuple[str, str]]) -> None:
+    missing = {endpoint for edge in edges for endpoint in edge} - nodes
+    if missing:
+        raise ValueError(
+            "Snapshot edges reference missing nodes: " + ", ".join(sorted(missing))
+        )
 
 
 class Store:
@@ -172,7 +202,10 @@ class Store:
         if existing is None:
             self.set_meta("schema_version", SCHEMA_VERSION)
 
-        elif existing != SCHEMA_VERSION and fts_ok:
+        elif existing != SCHEMA_VERSION:
+            # Snapshot migrations do not require FTS to be available.
+            if not fts_ok and existing in {"1", "2"}:
+                return
             self._migrate(existing)
 
         self._conn.commit()
@@ -199,6 +232,11 @@ class Store:
             except sqlite3.OperationalError:
                 pass  # FTS5 unavailable — degraded gracefully
             self.set_meta("schema_version", "3")
+            v = "3"
+        if v == "3":
+            # Additive snapshot tables were created by _DDL. Existing lifetime
+            # metadata cannot reconstruct removals/reintroductions; do not infer it.
+            self.set_meta("schema_version", "4")
         self._conn.commit()
 
     def _maybe_load_vec(self) -> None:
@@ -239,6 +277,8 @@ class Store:
         data: dict,
         commit: str | None = None,
         changed_paths: set | None = None,
+        *,
+        snapshot: bool = False,
     ) -> None:
         """Upsert all nodes/edges from a fully-enriched graph dict.
 
@@ -246,7 +286,32 @@ class Store:
         can assert that only the expected change set was processed.  The full
         graph is always written because Phase-1 parsers scan the whole repo;
         per-file parsing is a future optimisation.
+
+        Snapshot recording requires explicit *snapshot=True* and a commit. The
+        caller asserts that the graph represents that commit's tree;
+        index.build() enables it only for clean inputs. External-package nodes
+        and their incident edges are excluded from the snapshot, but retained
+        in the current graph. Missing edge endpoints raise ValueError before
+        any synchronization writes when snapshot recording is enabled.
         """
+        snapshot_nodes: set[str] = set()
+        snapshot_edges: set[tuple[str, str]] = set()
+        if commit and snapshot:
+            node_ids = {node["id"] for node in data["nodes"]}
+            external_ids = {
+                node["id"] for node in data["nodes"] if node.get("type") == "import"
+            }
+            edges = {(link["source"], link["target"]) for link in data["links"]}
+            # Validate the complete input first, including external incident
+            # edges, so projection cannot hide a malformed internal endpoint.
+            _validate_snapshot_edges(node_ids, edges)
+            snapshot_nodes = node_ids - external_ids
+            snapshot_edges = {
+                (source, target)
+                for source, target in edges
+                if source not in external_ids and target not in external_ids
+            }
+
         now = _now()
         seen_file_ids: list[int] = []
         node_id_map: dict[str, int] = {}  # path -> rowid
@@ -401,7 +466,78 @@ class Store:
                 (commit, now),
             )
 
+        if commit and snapshot:
+            self.record_graph_snapshot(
+                commit,
+                snapshot_nodes,
+                snapshot_edges,
+                coverage="index",
+            )
         self._conn.commit()
+
+    def record_graph_snapshot(
+        self,
+        commit: str,
+        nodes: set[str],
+        edges: set[tuple[str, str]],
+        *,
+        coverage: str = "python,javascript,typescript,vue",
+    ) -> None:
+        """Atomically associate an exact commit with deduplicated graph membership.
+
+        Coverage describes extracted languages, not a claim of compiler-level
+        completeness. This never changes the active working-directory graph.
+        Callers supply the intended node/edge membership; edges with missing
+        endpoints raise ValueError before any writes or snapshot replacement.
+        """
+        from blastradius.import_graph import EXTRACTION_VERSION
+
+        _validate_snapshot_edges(nodes, edges)
+        payload = json.dumps(
+            [sorted(nodes), sorted(edges), coverage, EXTRACTION_VERSION],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        snapshot_id = hashlib.sha256(payload.encode()).hexdigest()
+        with self._conn:
+            # A normal index can contain other languages and cross-language links
+            # that Python/JS-only backfill must not overwrite.
+            existing = self._conn.execute(
+                "SELECT g.coverage, g.extraction_version FROM commit_snapshots c "
+                "JOIN graph_snapshots g ON g.id=c.snapshot_id WHERE c.commit_hash=?",
+                (commit,),
+            ).fetchone()
+            if (
+                existing
+                and existing[0] == "index"
+                and coverage != "index"
+                and existing[1] == EXTRACTION_VERSION
+            ):
+                return
+            exists = self._conn.execute(
+                "SELECT 1 FROM graph_snapshots WHERE id=?", (snapshot_id,)
+            ).fetchone()
+            if not exists:
+                self._conn.execute(
+                    "INSERT INTO graph_snapshots VALUES (?,?,?)",
+                    (snapshot_id, coverage, EXTRACTION_VERSION),
+                )
+                self._conn.executemany(
+                    "INSERT INTO snapshot_nodes VALUES (?,?)",
+                    ((snapshot_id, path) for path in sorted(nodes)),
+                )
+                self._conn.executemany(
+                    "INSERT INTO snapshot_edges VALUES (?,?,?)",
+                    ((snapshot_id, source, target) for source, target in sorted(edges)),
+                )
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO files(path, active) VALUES (?,0)",
+                ((path,) for path in sorted(nodes)),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO commit_snapshots VALUES (?,?)",
+                (commit, snapshot_id),
+            )
 
     def sync_symbols(
         self,
@@ -592,16 +728,58 @@ class Store:
             [(h,) for h in reachable],
         )
 
-    def as_of_impact(self, file_path: str, reachable: set) -> dict | None:
+    def snapshot_paths(self, commit_hash: str) -> list[str] | None:
+        """Exact node membership, or None when this commit has no snapshot."""
+        row = self._conn.execute(
+            "SELECT snapshot_id FROM commit_snapshots WHERE commit_hash=?",
+            (commit_hash,),
+        ).fetchone()
+        if row is None:
+            return None
+        return [
+            row[0]
+            for row in self._conn.execute(
+                "SELECT path FROM snapshot_nodes WHERE snapshot_id=? ORDER BY path",
+                (row[0],),
+            )
+        ]
+
+    def as_of_impact(
+        self, file_path: str, reachable: set, *, commit_hash: str | None = None
+    ) -> dict | None:
         """Compute blast radius for file_path at the historical point defined by reachable.
 
-        *reachable* is the set of commit hashes reachable from the --as-of ref,
-        obtained via `git log --format=%H <ref>`.
-        Returns None if no temporal data is available.
+        Supplying *commit_hash* selects exact snapshot membership. The legacy
+        *reachable*-only call retains first/last metadata semantics. Returns None
+        if the requested file or exact snapshot is unavailable.
         """
         from blastradius.impact import (
             compute_blast_radius,  # avoid circular at module level
         )
+
+        if commit_hash is not None:
+            row = self._conn.execute(
+                "SELECT snapshot_id FROM commit_snapshots WHERE commit_hash=?",
+                (commit_hash,),
+            ).fetchone()
+            if row is None:
+                return None
+            snapshot_id = row[0]
+            nodes = [
+                {"id": row[0]}
+                for row in self._conn.execute(
+                    "SELECT path FROM snapshot_nodes WHERE snapshot_id=? ORDER BY path",
+                    (snapshot_id,),
+                )
+            ]
+            links = [
+                {"source": row[0], "target": row[1]}
+                for row in self._conn.execute(
+                    "SELECT source, target FROM snapshot_edges WHERE snapshot_id=? ORDER BY source, target",
+                    (snapshot_id,),
+                )
+            ]
+            return compute_blast_radius(nodes, links).get(file_path)
 
         self._populate_reachable_temp(reachable)
 

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from blastradius.analyze import analyze
 from blastradius.impact import compute_blast_radius, enrich_links, enrich_nodes
+from blastradius.import_graph import Snapshot
 from blastradius.store import Store
 
 INDEX_FILENAME = "blastradius.json"
@@ -44,6 +45,60 @@ def _git_head(root: Path) -> str | None:
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:  # noqa: BLE001
         return None
+
+
+def _snapshot_matches_head(root: Path) -> bool:
+    """Never label an uncommitted working graph as the exact HEAD graph."""
+    try:
+        outputs = {INDEX_FILENAME, "symbolindex.json"}
+        result = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            timeout=30,
+            check=False,
+        )
+        if result.returncode:
+            return False
+        entries = iter(result.stdout.split("\0"))
+        for entry in entries:
+            if not entry:
+                continue
+            paths = [entry[3:]]
+            if "R" in entry[:2] or "C" in entry[:2]:
+                paths.append(next(entries, ""))
+            for path in paths:
+                # Ignore only known outputs. Any other change could affect an
+                # analyzer, including Go/Rust or infrastructure configuration.
+                if path in outputs or path.startswith(".blastradius/"):
+                    continue
+                return False
+        tracked = subprocess.run(
+            ["git", "ls-files", "--cached", "-z"],
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            timeout=30,
+            check=False,
+        )
+        if tracked.returncode:
+            return False
+        # Git status omits ignored files. Check the same directory inventory
+        # available to analysis, before root-ignore filtering, against Git too.
+        # Skipped directories are already absent from this inventory.
+        uncommitted = (
+            Snapshot.directory(root).paths - set(tracked.stdout.split("\0")) - outputs
+        )
+        return not uncommitted
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
@@ -179,6 +234,7 @@ def build(repo_path: str, output: Path | None = None) -> dict:
     # Detect changed file set for informational logging
     db_path = db_path_for(root)
     head_commit = _git_head(root)
+    snapshot_matches_head = bool(head_commit) and _snapshot_matches_head(root)
     changed_paths: set | None = None
 
     with closing(Store(db_path)) as store:
@@ -194,7 +250,12 @@ def build(repo_path: str, output: Path | None = None) -> dict:
         elif last_commit is None:
             print("Incremental: first index — full scan", file=sys.stderr)
 
-        store.sync(data, commit=head_commit, changed_paths=changed_paths)
+        store.sync(
+            data,
+            commit=head_commit,
+            changed_paths=changed_paths,
+            snapshot=snapshot_matches_head,
+        )
 
         if head_commit:
             store.set_meta("last_indexed_commit", head_commit)

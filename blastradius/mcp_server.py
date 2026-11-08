@@ -440,19 +440,20 @@ def _call_temporal_impact(params: dict, artifacts: Artifacts) -> dict:
     as_of = params.get("as_of")
     file_arg = params["file"]
 
-    # Resolve file path against indexed files
-    all_paths = [r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()]
-    file_id = resolve_file_id(file_arg, all_paths, repo_root)
-
-    if not file_id:
-        raise ValueError(f"File not found in index: {file_arg}")
-
     if as_of:
         full_hash = git_resolve(repo_root, as_of)
         if not full_hash:
             raise ValueError(f"Could not resolve ref: {as_of}")
+        paths = store.snapshot_paths(full_hash)
+        if paths is None:
+            paths = [
+                r[0] for r in store._conn.execute("SELECT path FROM files").fetchall()
+            ]
+        file_id = resolve_file_id(file_arg, paths, repo_root)
+        if not file_id:
+            raise ValueError(f"File not found in index: {file_arg}")
         reachable = git_reachable(repo_root, full_hash)
-        blast = store.as_of_impact(file_id, reachable)
+        blast = store.as_of_impact(file_id, reachable, commit_hash=full_hash)
         if blast is None:
             raise ValueError(
                 f"No temporal data for {file_id} at {as_of}. "

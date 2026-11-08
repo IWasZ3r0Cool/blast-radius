@@ -7,30 +7,14 @@ from __future__ import annotations
 Dependency rule: must not import from blastradius.graph or blastradius.semantic.
 """
 
-import ast
-import re
 import subprocess
 import sys
-from pathlib import Path
+from collections import OrderedDict
+from pathlib import Path, PurePosixPath
 
-_JS_IMPORT_RE = re.compile(
-    r"""(?:from\s+|(?:require|import)\s*\(?\s*)['"]([^'"]+)['"]""",
-    re.MULTILINE,
-)
-
-# Extensions we attempt to parse for imports
-_PARSEABLE = frozenset(
-    {
-        ".py",
-        ".js",
-        ".ts",
-        ".jsx",
-        ".tsx",
-        ".mjs",
-        ".cjs",
-    }
-)
-
+from blastradius.import_graph import ImportGraph, Snapshot, report_diagnostics
+from blastradius.import_graph.parsing import Parsed, parse
+from blastradius.import_graph.snapshot import SOURCE_EXTENSIONS, skipped
 
 # ── git plumbing helpers ──────────────────────────────────────────────────────
 
@@ -42,10 +26,12 @@ def _run(cmd: list, cwd: Path, timeout: int = 60) -> str:
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
         timeout=timeout,
-        check=False,
+        check=True,
     )
-    return r.stdout if r.returncode == 0 else ""
+    return r.stdout
 
 
 def git_log(
@@ -58,6 +44,7 @@ def git_log(
         "git",
         "log",
         "--format=%H%x00%ae%x00%aI%x00%cI%x00%P%x00%s",
+        "--topo-order",
         "--reverse",
     ]
     if since:
@@ -90,20 +77,19 @@ def git_log(
 
 def git_ls_tree(root: Path, commit_hash: str) -> dict[str, str]:
     """Return {repo_relative_path: blob_hash} for all files at commit."""
-    out = _run(["git", "ls-tree", "-r", commit_hash], root)
+    out = _run(["git", "ls-tree", "-rz", "--full-tree", commit_hash], root)
     tree = {}
-    for line in out.splitlines():
-        # format: <mode> <type> <hash>\t<path>
-        if "\t" not in line:
+    for entry in out.split("\0"):
+        if "\t" not in entry:
             continue
-        meta, path = line.split("\t", 1)
+        meta, path = entry.split("\t", 1)
         parts = meta.split()
-        if len(parts) >= 3 and parts[1] == "blob":
+        if len(parts) == 3 and parts[0] in {"100644", "100755"} and parts[1] == "blob":
             tree[path] = parts[2]
     return tree
 
 
-def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, str]:
+def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, bytes]:
     """Read multiple blobs via git cat-file --batch without touching working tree."""
     if not blob_hashes:
         return {}
@@ -116,9 +102,20 @@ def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, str]:
         stderr=subprocess.PIPE,
     )
     inp = "\n".join(blob_hashes) + "\n"
-    stdout, _ = proc.communicate(inp.encode(), timeout=60)
+    try:
+        stdout, stderr = proc.communicate(inp.encode(), timeout=60)
+    except BaseException:
+        # Clean up the child even on KeyboardInterrupt/SystemExit, then let the
+        # original interruption propagate rather than leaving Git running.
+        proc.kill()
+        proc.communicate()
+        raise
+    if proc.returncode:
+        raise RuntimeError(
+            f"git cat-file failed: {stderr.decode('utf-8', errors='replace')}"
+        )
 
-    results: dict[str, str] = {}
+    results: dict[str, bytes] = {}
     pos = 0
     data = stdout
 
@@ -136,107 +133,12 @@ def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, str]:
         except ValueError:
             continue
         content_bytes = data[pos : pos + size]
-        results[blob_hash] = content_bytes.decode("utf-8", errors="replace")
+        results[blob_hash] = content_bytes
         pos += size + 1  # trailing newline after blob content
 
+    if len(results) != len(set(blob_hashes)):
+        raise RuntimeError("git cat-file returned incomplete blob data")
     return results
-
-
-# ── lightweight import extractor ──────────────────────────────────────────────
-
-
-def _python_imports(rel_path: str, content: str, known_files: set) -> list[str]:
-    """Extract Python imports that resolve to files in known_files."""
-    try:
-        tree = ast.parse(content, filename=rel_path)
-    except SyntaxError:
-        return []
-
-    base_dir = str(Path(rel_path).parent)
-    results: list[str] = []
-
-    def _resolve(mod: str, level: int = 0) -> str | None:
-        if level:
-            # Relative import
-            parts_base = base_dir.split("/") if base_dir != "." else []
-            for _ in range(level - 1):
-                if parts_base:
-                    parts_base.pop()
-            prefix = "/".join(parts_base)
-            mod_parts = (mod or "").split(".")
-            for candidate in [
-                (prefix + "/" + "/".join(mod_parts) + ".py").lstrip("/"),
-                (prefix + "/" + "/".join(mod_parts) + "/__init__.py").lstrip("/"),
-            ]:
-                if candidate in known_files:
-                    return candidate
-            return None
-
-        parts = mod.split(".")
-        for candidate in [
-            "/".join(parts) + ".py",
-            "/".join(parts) + "/__init__.py",
-            base_dir + "/" + parts[0] + ".py",
-        ]:
-            c = candidate.lstrip("/")
-            if c in known_files:
-                return c
-        return None
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                r = _resolve(alias.name)
-                if r:
-                    results.append(r)
-        elif isinstance(node, ast.ImportFrom):
-            mod = node.module or ""
-            r = _resolve(mod, level=node.level or 0)
-            if r:
-                results.append(r)
-
-    return list(set(results))
-
-
-def _js_imports(rel_path: str, content: str, known_files: set) -> list[str]:
-    """Extract JS/TS imports that resolve to files in known_files."""
-    base_dir = str(Path(rel_path).parent)
-    results: list[str] = []
-
-    for m in _JS_IMPORT_RE.finditer(content):
-        spec = m.group(1)
-        if not spec.startswith("."):
-            continue  # external package
-        # Resolve relative path
-        candidate_raw = str((Path(base_dir) / spec).as_posix())
-        for candidate in [
-            candidate_raw,
-            candidate_raw + ".js",
-            candidate_raw + ".ts",
-            candidate_raw + ".jsx",
-            candidate_raw + ".tsx",
-            candidate_raw + "/index.js",
-            candidate_raw + "/index.ts",
-        ]:
-            c = candidate.lstrip("/")
-            if c in known_files:
-                results.append(c)
-                break
-
-    return list(set(results))
-
-
-def _extract_imports(rel_path: str, content: str, known_files: set) -> list[str]:
-    ext = Path(rel_path).suffix.lower()
-    if ext == ".py":
-        return _python_imports(rel_path, content, known_files)
-    if ext in {".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"}:
-        return _js_imports(rel_path, content, known_files)
-    return []
-
-
-def _is_parseable(rel_path: str) -> bool:
-    return Path(rel_path).suffix.lower() in _PARSEABLE
 
 
 # ── backfill ──────────────────────────────────────────────────────────────────
@@ -272,7 +174,10 @@ def backfill(
     edge_first_seen: dict[tuple, str] = {}
     edge_last_seen_alive: dict[tuple, str] = {}
 
-    prev_tree: dict[str, str] = {}  # path → blob_hash at previous commit
+    blob_cache: OrderedDict[str, bytes] = OrderedDict()
+    parsed_cache: dict[str, tuple[str, Parsed]] = {}
+    diagnostics: set[str] = set()
+    unsupported: set[str] = set()
 
     processed = 0
 
@@ -287,35 +192,70 @@ def backfill(
                 file_first_seen[path] = h
             file_last_seen_alive[path] = h
 
-        # ── edge extraction for changed (added/modified) files ─────────────────
-        added = {p for p in curr_tree if p not in prev_tree}
-        modified = {
-            p for p in curr_tree if p in prev_tree and curr_tree[p] != prev_tree[p]
+        # Prefetch bytes in batches, including common configuration files.
+        readable = [
+            path
+            for path in curr_tree
+            if not skipped(path)
+            and (
+                PurePosixPath(path).suffix.lower()
+                in SOURCE_EXTENSIONS | {".json", ".jsonc"}
+                or path == ".gitignore"
+            )
+        ]
+        # skipped() excludes dotfiles; .gitignore is nevertheless configuration.
+        if ".gitignore" in curr_tree and ".gitignore" not in readable:
+            readable.append(".gitignore")
+        hashes = {curr_tree[path] for path in readable}
+        contents = {blob: blob_cache[blob] for blob in hashes if blob in blob_cache}
+        contents.update(_git_cat_file_batch(root, sorted(hashes - contents.keys())))
+
+        def read_blob(path, tree=curr_tree, contents=contents):
+            blob = tree[path]
+            if blob not in contents:
+                # Prefetch extensions are only an optimization. Configuration
+                # extends may refer to any file advertised by the snapshot.
+                if blob in blob_cache:
+                    contents[blob] = blob_cache[blob]
+                else:
+                    contents.update(_git_cat_file_batch(root, [blob]))
+            return contents[blob]
+
+        snapshot = Snapshot(known_files, read_blob)
+        # Retain syntax only for the current tree. Resolve it afresh so unchanged
+        # importers can acquire new targets or follow changed configuration.
+        parsed_cache = {
+            path: (
+                parsed_cache[path]
+                if path in parsed_cache and parsed_cache[path][0] == curr_tree[path]
+                else (curr_tree[path], parse(path, snapshot.read(path)))
+            )
+            for path in sorted(snapshot.files)
+            if PurePosixPath(path).suffix in SOURCE_EXTENSIONS
         }
-        changed = added | modified
+        graph = ImportGraph(
+            snapshot,
+            parsed_sources={path: entry[1] for path, entry in parsed_cache.items()},
+        )
+        nodes, edges = graph.graph()
+        # Include on-demand reads in the cross-commit cache as well.
+        for blob, content in contents.items():
+            blob_cache[blob] = content
+            blob_cache.move_to_end(blob)
+        while len(blob_cache) > 512:
+            blob_cache.popitem(last=False)
+        diagnostics.update(graph.diagnostics)
+        unsupported.update(
+            PurePosixPath(path).suffix
+            for path in snapshot.files
+            if PurePosixPath(path).suffix in {".go", ".rs"}
+        )
+        store.record_graph_snapshot(h, nodes, edges)
+        for source, target in edges:
+            key = (source, target, "imports")
+            edge_first_seen.setdefault(key, h)
+            edge_last_seen_alive[key] = h
 
-        parseable = [p for p in changed if _is_parseable(p)]
-        if parseable:
-            blobs = [curr_tree[p] for p in parseable]
-            contents = _git_cat_file_batch(root, blobs)
-            for path in parseable:
-                blob_h = curr_tree[path]
-                content = contents.get(blob_h, "")
-                for target in _extract_imports(path, content, known_files):
-                    key = (path, target, "imports")
-                    if key not in edge_first_seen:
-                        edge_first_seen[key] = h
-                    edge_last_seen_alive[key] = h
-
-        # ── propagate last-seen for unchanged edges ──────────────────────────
-        # Edges whose source is NOT in changed set: if source still in tree,
-        # the edge still exists — advance its last-seen.
-        for key in list(edge_first_seen):
-            src, tgt, _kind = key
-            if src not in changed and src in curr_tree and tgt in curr_tree:
-                edge_last_seen_alive[key] = h
-
-        prev_tree = curr_tree
         processed += 1
 
         if processed % 100 == 0:
@@ -325,6 +265,12 @@ def backfill(
     store.apply_file_temporal(file_first_seen, file_last_seen_alive)
     store.apply_edge_temporal(edge_first_seen, edge_last_seen_alive)
 
+    report_diagnostics(diagnostics)
+    if unsupported:
+        print(
+            "History import coverage: Python and JS/TS/Vue; Go/Rust dependencies are not backfilled.",
+            file=sys.stderr,
+        )
     files_tracked = len(file_first_seen)
     print(
         f"Backfill complete: {processed} commits, {files_tracked} files tracked.",

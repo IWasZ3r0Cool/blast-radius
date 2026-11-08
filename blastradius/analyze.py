@@ -54,7 +54,8 @@ def detect_languages(root: Path) -> list:
     if _any_match(root, ["*.py"]):
         langs.append("python")
     if (root / "package.json").exists() or _any_match(
-        root, ["*.js", "*.ts", "*.jsx", "*.tsx", "*.mjs", "*.vue"]
+        root,
+        ["*.js", "*.ts", "*.jsx", "*.tsx", "*.mjs", "*.cjs", "*.mts", "*.cts", "*.vue"],
     ):
         langs.append("javascript")
     if _any_match(root, ["*.css", "*.scss", "*.sass", "*.less", "*.styl"]):
