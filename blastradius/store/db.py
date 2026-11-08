@@ -155,6 +155,14 @@ def _content_hash(repo_root: Path | None, file_id: str) -> str | None:
         return None
 
 
+def _validate_snapshot_edges(nodes: set[str], edges: set[tuple[str, str]]) -> None:
+    missing = {endpoint for edge in edges for endpoint in edge} - nodes
+    if missing:
+        raise ValueError(
+            "Snapshot edges reference missing nodes: " + ", ".join(sorted(missing))
+        )
+
+
 class Store:
     """Persistent graph store backed by SQLite.
 
@@ -270,7 +278,7 @@ class Store:
         commit: str | None = None,
         changed_paths: set | None = None,
         *,
-        snapshot: bool = True,
+        snapshot: bool = False,
     ) -> None:
         """Upsert all nodes/edges from a fully-enriched graph dict.
 
@@ -279,10 +287,31 @@ class Store:
         graph is always written because Phase-1 parsers scan the whole repo;
         per-file parsing is a future optimisation.
 
-        With *snapshot=True* and a commit, the caller asserts that the graph
-        represents that commit's tree. Working-tree callers must disable this
-        for uncommitted inputs; index.build() performs that check.
+        Snapshot recording requires explicit *snapshot=True* and a commit. The
+        caller asserts that the graph represents that commit's tree;
+        index.build() enables it only for clean inputs. External-package nodes
+        and their incident edges are excluded from the snapshot, but retained
+        in the current graph. Missing edge endpoints raise ValueError before
+        any synchronization writes when snapshot recording is enabled.
         """
+        snapshot_nodes: set[str] = set()
+        snapshot_edges: set[tuple[str, str]] = set()
+        if commit and snapshot:
+            node_ids = {node["id"] for node in data["nodes"]}
+            external_ids = {
+                node["id"] for node in data["nodes"] if node.get("type") == "import"
+            }
+            edges = {(link["source"], link["target"]) for link in data["links"]}
+            # Validate the complete input first, including external incident
+            # edges, so projection cannot hide a malformed internal endpoint.
+            _validate_snapshot_edges(node_ids, edges)
+            snapshot_nodes = node_ids - external_ids
+            snapshot_edges = {
+                (source, target)
+                for source, target in edges
+                if source not in external_ids and target not in external_ids
+            }
+
         now = _now()
         seen_file_ids: list[int] = []
         node_id_map: dict[str, int] = {}  # path -> rowid
@@ -440,8 +469,8 @@ class Store:
         if commit and snapshot:
             self.record_graph_snapshot(
                 commit,
-                {node["id"] for node in data["nodes"] if node.get("type") != "import"},
-                {(link["source"], link["target"]) for link in data["links"]},
+                snapshot_nodes,
+                snapshot_edges,
                 coverage="index",
             )
         self._conn.commit()
@@ -458,14 +487,12 @@ class Store:
 
         Coverage describes extracted languages, not a claim of compiler-level
         completeness. This never changes the active working-directory graph.
+        Callers supply the intended node/edge membership; edges with missing
+        endpoints raise ValueError before any writes or snapshot replacement.
         """
         from blastradius.import_graph import EXTRACTION_VERSION
 
-        edges = {
-            (source, target)
-            for source, target in edges
-            if source in nodes and target in nodes
-        }
+        _validate_snapshot_edges(nodes, edges)
         payload = json.dumps(
             [sorted(nodes), sorted(edges), coverage, EXTRACTION_VERSION],
             ensure_ascii=True,

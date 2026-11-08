@@ -8,7 +8,7 @@ import pytest
 
 from blastradius.analyze import analyze
 from blastradius.import_graph import ImportGraph, Snapshot
-from blastradius.import_graph.parsing import javascript_imports, python_imports
+from blastradius.import_graph.parsing import javascript_imports, parse, python_imports
 
 
 def graph_for(sources):
@@ -69,6 +69,30 @@ def test_python_encoding_and_parse_diagnostics():
     assert graph.analyze("main.py").targets == ("utils.py",)
     graph = graph_for({"main.py": "import (", "utils.py": ""})
     assert "Python parse error" in " ".join(graph.analyze("main.py").diagnostics)
+
+
+def test_normal_index_retains_malformed_python_file_and_healthy_siblings(
+    tmp_path, capsys
+):
+    (tmp_path / "broken.py").write_text("import (", encoding="utf-8")
+    (tmp_path / "healthy.py").write_text("from target import VALUE\n", encoding="utf-8")
+    (tmp_path / "target.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    data = analyze(str(tmp_path))
+
+    assert {node["id"] for node in data["nodes"]} == {
+        "broken.py",
+        "healthy.py",
+        "target.py",
+    }
+    assert {(link["source"], link["target"]) for link in data["links"]} == {
+        ("healthy.py", "target.py")
+    }
+    output = capsys.readouterr()
+    assert "broken.py: Python parse error" in output.err
+    assert "analyzer failed" not in output.err
+    assert "Traceback" not in output.err
+    assert output.out == ""
 
 
 def test_unresolved_absolute_python_package_is_local_and_diagnostic_is_repeatable():
@@ -288,6 +312,22 @@ def test_cached_parsing_is_independent_of_resolution_context():
     graph_for({"a.py": "import b", "b.py": ""}).analyze("a.py")
     graph_for({"a.py": "import b", "src/b.py": ""}).analyze("a.py")
     assert python_imports.cache_info().hits == 1
+
+
+@pytest.mark.parametrize("source", [b"import b", b"import b\nbroken ="])
+def test_preparsed_sources_reuse_syntax_with_fallback_and_explicit_source(source):
+    sources = {"a.py": source, "b.py": b"", "c.py": b""}
+    expected = graph_for(sources).analyze("a.py")
+    parsed = parse("a.py", source)
+
+    def read(path):
+        assert path != "a.py", "a pre-parsed source should not be read again"
+        return sources[path]
+
+    graph = ImportGraph(Snapshot(sources, read), parsed_sources={"a.py": parsed})
+    assert graph.analyze("a.py") == expected
+    assert graph.analyze("b.py").targets == ()
+    assert graph.analyze("a.py", b"import c").targets == ("c.py",)
 
 
 def test_normal_index_and_snapshot_share_internal_edges(tmp_path: Path):

@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import posixpath
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 import json5
 
-from .parsing import Reference, parse
+from .parsing import Parsed, Reference, parse
 from .snapshot import (
     JS_EXTENSIONS,
     SOURCE_EXTENSIONS,
@@ -20,7 +21,7 @@ from .snapshot import (
     normalize,
 )
 
-EXTRACTION_VERSION = "1"
+EXTRACTION_VERSION = "2"
 _EXTENSIONS = (
     ".ts",
     ".tsx",
@@ -62,7 +63,11 @@ def report_diagnostics(diagnostics) -> None:
 class ImportGraph:
     """Resolve imports solely against a snapshot, with no installed-package lookup."""
 
-    def __init__(self, snapshot: Snapshot):
+    def __init__(
+        self, snapshot: Snapshot, *, parsed_sources: Mapping[str, Parsed] | None = None
+    ):
+        # Callers may reuse syntax from this snapshot; resolution stays local.
+        self._parsed_sources = parsed_sources if parsed_sources is not None else {}
         self.snapshot = snapshot
         self.files = snapshot.files
         self.diagnostics: set[str] = set()
@@ -383,7 +388,11 @@ class ImportGraph:
 
     def analyze(self, path: str, source: bytes | None = None) -> ImportResult:
         try:
-            parsed = parse(path, self.snapshot.read(path) if source is None else source)
+            parsed = self._parsed_sources.get(path) if source is None else None
+            if parsed is None:
+                parsed = parse(
+                    path, self.snapshot.read(path) if source is None else source
+                )
         except OSError as exc:
             result = ImportResult(0, (), (), (f"{path}: cannot read source: {exc}",))
             self.diagnostics.update(result.diagnostics)

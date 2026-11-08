@@ -17,6 +17,7 @@ from pathlib import Path
 
 from blastradius.analyze import analyze
 from blastradius.impact import compute_blast_radius, enrich_links, enrich_nodes
+from blastradius.import_graph import Snapshot
 from blastradius.store import Store
 
 INDEX_FILENAME = "blastradius.json"
@@ -49,6 +50,7 @@ def _git_head(root: Path) -> str | None:
 def _snapshot_matches_head(root: Path) -> bool:
     """Never label an uncommitted working graph as the exact HEAD graph."""
     try:
+        outputs = {INDEX_FILENAME, "symbolindex.json"}
         result = subprocess.run(
             ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             cwd=root,
@@ -72,12 +74,29 @@ def _snapshot_matches_head(root: Path) -> bool:
             for path in paths:
                 # Ignore only known outputs. Any other change could affect an
                 # analyzer, including Go/Rust or infrastructure configuration.
-                if path in {INDEX_FILENAME, "symbolindex.json"} or path.startswith(
-                    ".blastradius/"
-                ):
+                if path in outputs or path.startswith(".blastradius/"):
                     continue
                 return False
-        return True
+        tracked = subprocess.run(
+            ["git", "ls-files", "--cached", "-z"],
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            timeout=30,
+            check=False,
+        )
+        if tracked.returncode:
+            return False
+        # Git status omits ignored files. Check the same directory inventory
+        # available to analysis, before root-ignore filtering, against Git too.
+        # Skipped directories are already absent from this inventory.
+        uncommitted = (
+            Snapshot.directory(root).paths - set(tracked.stdout.split("\0")) - outputs
+        )
+        return not uncommitted
     except (OSError, subprocess.SubprocessError):
         return False
 

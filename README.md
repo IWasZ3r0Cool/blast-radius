@@ -300,6 +300,8 @@ It reads source and configuration bytes through `git cat-file --batch`, caches
 source parsing, and resolves imports against each commit's own file inventory.
 Adding a target or changing aliases therefore updates dependencies even when
 the importer is unchanged. Identical graphs share snapshot storage.
+Local configuration files outside the prefetched extensions are read on demand
+and cached through the same Git blob reader.
 
 Historical import extraction covers **Python and JavaScript/TypeScript/Vue**.
 Python resolution includes relative imports, named child modules, package
@@ -321,12 +323,26 @@ historical CSS-to-CSS extraction is not included.
 or reintroduced dependencies and branch histories do not depend on one lifetime
 interval. Clean normal indexes also record commit snapshots. Dirty working-tree
 indexes update the current graph without replacing the committed snapshot.
+The snapshot guard also checks the non-skipped directory inventory for ignored
+uncommitted files. This conservative check can prevent automatic snapshots for
+unrelated ignored files too; normal indexing and file selection are unchanged.
+
+For programmatic writes, `Store.sync()` updates only the current graph by default,
+even when given a commit. Pass `snapshot=True` explicitly only when its input
+represents that commit's tree. Snapshot projection excludes external-package
+nodes (`type="import"`) and their incident edges; other internal nodes and edges
+are retained. Both explicit snapshot synchronization and
+`Store.record_graph_snapshot()` reject missing edge endpoints with `ValueError`
+before writes, rather than silently discarding malformed dependencies.
 
 After upgrading an existing database, run `blastradius history` to populate
 snapshots for historical queries. The default covers at most 1000 commits;
 references outside the processed range require another backfill with appropriate
 bounds. Existing first/last metadata remains available for `changed-since` and
 symbol search; their temporal semantics are unchanged by snapshot storage.
+Rerun history after upgrading from extraction version 1 to repair older index
+snapshots using the documented backfill coverage above. Current-version full
+index snapshots retain their existing protection. No database migration is needed.
 
 A local Python 3.10 comparison on 202 source files and eight commits measured
 normal indexing at 0.16s (previously 0.25s) and backfill at 0.35s (previously

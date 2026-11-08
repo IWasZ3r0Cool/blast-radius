@@ -2,6 +2,7 @@
 # Licensed under the Apache License, Version 2.0
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
 import subprocess
@@ -9,12 +10,17 @@ from contextlib import closing
 
 import pytest
 
+from blastradius import import_graph
+from blastradius.analyze import analyze
 from blastradius.artifacts import Artifacts
 from blastradius.cli import _build_parser, _cmd_impact
+from blastradius.impact import compute_blast_radius
 from blastradius.import_graph import ImportGraph, Snapshot
+from blastradius.import_graph.parsing import javascript_imports, python_imports
 from blastradius.index import build, db_path_for, git_reachable
 from blastradius.mcp_server import _call_temporal_impact
 from blastradius.store import Store
+from blastradius.temporal import history
 from blastradius.temporal.history import backfill
 
 
@@ -63,6 +69,109 @@ def snapshot_edges(store, revision):
     }
 
 
+def test_sync_requires_snapshot_opt_in(tmp_path):
+    graph = {
+        "nodes": [{"id": "a.py"}, {"id": "b.py"}],
+        "links": [{"source": "a.py", "target": "b.py"}],
+    }
+    with closing(Store(tmp_path / "index.db")) as store:
+        store.sync(graph, commit="head")
+        assert store.snapshot_paths("head") is None
+        assert store.status()["active_edges"] == 1
+
+        store.sync(graph, commit="head", snapshot=True)
+        assert dependents(store, "b.py", "head") == {"a.py"}
+
+        store.sync({"nodes": graph["nodes"], "links": []}, commit="head")
+        assert store.status()["active_edges"] == 0
+        assert dependents(store, "b.py", "head") == {"a.py"}
+
+
+def test_snapshot_projection_preserves_internal_topology(tmp_path):
+    graph = {
+        "nodes": [
+            {"id": "main.py", "type": "module"},
+            {"id": "crate/lib.rs", "type": "module", "language": "rust"},
+            {"id": "go/package", "type": "module", "language": "go"},
+            {"id": "database", "type": "database"},
+            {"id": "requests", "type": "import"},
+        ],
+        "links": [
+            {"source": "main.py", "target": "crate/lib.rs"},
+            {"source": "crate/lib.rs", "target": "go/package"},
+            {"source": "go/package", "target": "database"},
+            {"source": "main.py", "target": "requests"},
+        ],
+    }
+    original = copy.deepcopy(graph)
+    expected = compute_blast_radius(graph["nodes"], graph["links"])
+    with closing(Store(tmp_path / "index.db")) as store:
+        store.sync(graph, commit="head", snapshot=True)
+        assert set(store.snapshot_paths("head")) == {
+            "main.py",
+            "crate/lib.rs",
+            "go/package",
+            "database",
+        }
+        assert snapshot_edges(store, "head") == {
+            (link["source"], link["target"])
+            for link in graph["links"]
+            if link["target"] != "requests"
+        }
+        for path in store.snapshot_paths("head"):
+            assert store.as_of_impact(path, set(), commit_hash="head") == expected[path]
+        # The current graph and JSON input still include external dependencies.
+        assert store.status()["active_edges"] == 4
+        assert graph == original
+
+
+@pytest.mark.parametrize("via_sync", [False, True], ids=["record", "sync"])
+@pytest.mark.parametrize("existing", [False, True], ids=["new", "replacement"])
+@pytest.mark.parametrize("edge", [("a.py", "missing.py"), ("missing.py", "a.py")])
+def test_dangling_snapshot_edges_fail_before_writes(tmp_path, via_sync, existing, edge):
+    with closing(Store(tmp_path / "index.db")) as store:
+        if existing:
+            store.sync(
+                {
+                    "nodes": [{"id": "a.py"}, {"id": "b.py"}],
+                    "links": [{"source": "a.py", "target": "b.py"}],
+                },
+                commit="head",
+                snapshot=True,
+            )
+        before = list(store._conn.iterdump())
+        assert not store._conn.in_transaction
+        with pytest.raises(ValueError, match="missing.py"):
+            if via_sync:
+                store.sync(
+                    {
+                        "nodes": [{"id": "a.py"}, {"id": "new.py"}],
+                        "links": [{"source": edge[0], "target": edge[1]}],
+                    },
+                    commit="head",
+                    snapshot=True,
+                )
+            else:
+                store.record_graph_snapshot("head", {"a.py", "new.py"}, {edge})
+        assert not store._conn.in_transaction
+        assert list(store._conn.iterdump()) == before
+
+
+def test_external_projection_cannot_hide_missing_internal_endpoint(tmp_path):
+    with closing(Store(tmp_path / "index.db")) as store:
+        before = list(store._conn.iterdump())
+        with pytest.raises(ValueError, match="missing.py"):
+            store.sync(
+                {
+                    "nodes": [{"id": "requests", "type": "import"}],
+                    "links": [{"source": "missing.py", "target": "requests"}],
+                },
+                commit="head",
+                snapshot=True,
+            )
+        assert list(store._conn.iterdump()) == before
+
+
 def test_head_only_index_then_history_handles_removal_reintroduction_and_deletion(
     repo, monkeypatch, capsys
 ):
@@ -97,7 +206,7 @@ def test_head_only_index_then_history_handles_removal_reintroduction_and_deletio
     assert result["direct_ids"] == ["a.py"]
 
 
-def test_target_additions_config_changes_and_historical_bytes(repo):
+def test_target_additions_config_changes_and_historical_bytes(repo, monkeypatch):
     write(repo, "main.ts", 'import "@/target.js"; import "./late";\n')
     write(repo, "tsconfig.json", '{"compilerOptions":{"paths":{"@/*":["one/*"]}}}')
     write(repo, "one/target.ts", "export const value = 1;\n")
@@ -119,6 +228,14 @@ def test_target_additions_config_changes_and_historical_bytes(repo):
         and ".git" not in path.parts
         and ".blastradius" not in path.parts
     }
+    parse = history.parse
+    parsed_paths = []
+
+    def recording_parse(path, source):
+        parsed_paths.append(path)
+        return parse(path, source)
+
+    monkeypatch.setattr(history, "parse", recording_parse)
     with closing(Store(db_path_for(repo))) as store:
         backfill(repo, store)
         assert ("main.ts", "one/target.ts") in snapshot_edges(store, first)
@@ -127,6 +244,7 @@ def test_target_additions_config_changes_and_historical_bytes(repo):
         assert ("main.ts", "two/target.ts") in snapshot_edges(store, third)
         assert ("main.ts", "one/target.ts") not in snapshot_edges(store, third)
         assert ("legacy.py", "café.py") in snapshot_edges(store, first)
+    assert parsed_paths.count("main.ts") == 1
     for path, state in before.items():
         assert (path.read_bytes(), path.stat().st_mtime_ns) == state
 
@@ -279,6 +397,7 @@ def test_full_index_coverage_is_not_replaced_by_partial_backfill(tmp_path):
                 "links": [{"source": "main.py", "target": "rust.rs"}],
             },
             commit="head",
+            snapshot=True,
         )
         store.record_graph_snapshot("head", {"main.py"}, set())
         assert dependents(store, "rust.rs", "head") == {"main.py"}
@@ -331,3 +450,195 @@ def test_dirty_go_source_does_not_create_a_commit_snapshot(repo):
     build(str(repo))
     with closing(Store(db_path_for(repo))) as store:
         assert store.snapshot_paths(head) is None
+
+
+@pytest.mark.parametrize("ignore_location", ["src/.gitignore", ".git/info/exclude"])
+def test_ignored_uncommitted_source_cannot_enter_head_snapshot(repo, ignore_location):
+    write(repo, "main.py", "from src.generated import VALUE\n")
+    write(repo, "src/tracked.py", "VALUE = 1\n")
+    write(
+        repo,
+        ignore_location,
+        "generated.py\n"
+        if ignore_location.startswith("src/")
+        else "src/generated.py\n",
+    )
+    head = commit(repo, "tracked files and ignore rule")
+    write(repo, "src/generated.py", "VALUE = 2\n")
+    assert git(repo, "status", "--porcelain") == ""
+
+    expected = analyze(str(repo))
+    data = build(str(repo))
+    assert {node["id"] for node in data["nodes"]} == {
+        node["id"] for node in expected["nodes"]
+    }
+    assert data["links"] == expected["links"]
+    assert ("main.py", "src/generated.py") in {
+        (link["source"], link["target"]) for link in data["links"]
+    }
+    with closing(Store(db_path_for(repo))) as store:
+        assert store.snapshot_paths(head) is None
+
+
+def test_ignored_outputs_and_skipped_directories_allow_head_snapshot(repo):
+    write(repo, "main.py", "VALUE = 1\n")
+    write(
+        repo,
+        ".gitignore",
+        ".blastradius/\nblastradius.json\nsymbolindex.json\nnode_modules/\n.venv/\ndist/\n",
+    )
+    head = commit(repo, "clean source")
+    for path in [
+        "node_modules/generated.py",
+        ".venv/generated.py",
+        "dist/generated.py",
+        ".blastradius/output",
+        "blastradius.json",
+        "symbolindex.json",
+    ]:
+        write(repo, path, "ignored output\n")
+    build(str(repo))
+    with closing(Store(db_path_for(repo))) as store:
+        assert store.snapshot_paths(head) == ["main.py"]
+
+
+@pytest.mark.parametrize(
+    "valid_config", [True, False], ids=["custom-extension", "invalid-markdown"]
+)
+def test_historical_extends_reads_any_advertised_file(
+    repo, monkeypatch, capsys, valid_config
+):
+    filename = "config.base" if valid_config else "README.md"
+    write(repo, "tsconfig.json", json.dumps({"extends": "./" + filename}))
+    write(
+        repo,
+        filename,
+        '{"extends":"./config.shared"}' if valid_config else "# Not JSON\n",
+    )
+    write(repo, "config.shared", '{"compilerOptions":{"paths":{"@/*":["src/*"]}}}')
+    write(repo, "main.ts", 'import "@/target"; import "./direct";\n')
+    write(repo, "src/target.ts", "export const value = 1;\n")
+    write(repo, "direct.ts", "export const value = 1;\n")
+    first = commit(repo, "custom extends target")
+    write(repo, "direct.ts", "export const value = 2;\n")
+    head = commit(repo, "unchanged configuration")
+    expected_nodes, expected_edges = ImportGraph(Snapshot.directory(repo)).graph()
+    requested_blobs = []
+    read_batch = history._git_cat_file_batch
+
+    def recording_batch(root, hashes):
+        requested_blobs.extend(hashes)
+        return read_batch(root, hashes)
+
+    monkeypatch.setattr(history, "_git_cat_file_batch", recording_batch)
+    capsys.readouterr()
+    with closing(Store(db_path_for(repo))) as store:
+        assert backfill(repo, store)[0] == 2
+        assert set(store.snapshot_paths(head)) == expected_nodes
+        for revision in [first, head]:
+            assert snapshot_edges(store, revision) == expected_edges
+            assert ("main.ts", "direct.ts") in snapshot_edges(store, revision)
+    assert requested_blobs.count(git(repo, "rev-parse", head + ":" + filename)) == 1
+    if valid_config:
+        assert ("main.ts", "src/target.ts") in expected_edges
+        assert (
+            requested_blobs.count(git(repo, "rev-parse", head + ":config.shared")) == 1
+        )
+    else:
+        assert "README.md: invalid configuration" in capsys.readouterr().err
+
+
+def test_backfill_repairs_older_contaminated_index_snapshot(repo, monkeypatch):
+    write(repo, "main.py", "VALUE = 1\n")
+    head = commit(repo, "committed source")
+    with closing(Store(db_path_for(repo))) as store:
+        with monkeypatch.context() as previous_version:
+            previous_version.setattr(import_graph, "EXTRACTION_VERSION", "1")
+            store.record_graph_snapshot(
+                head,
+                {"main.py", "uncommitted.py"},
+                {("main.py", "uncommitted.py")},
+                coverage="index",
+            )
+        assert "uncommitted.py" in store.snapshot_paths(head)
+        backfill(repo, store)
+        assert store.snapshot_paths(head) == ["main.py"]
+        assert snapshot_edges(store, head) == set()
+        row = store._conn.execute(
+            "SELECT g.extraction_version,g.coverage FROM commit_snapshots c JOIN graph_snapshots g ON g.id=c.snapshot_id WHERE c.commit_hash=?",
+            (head,),
+        ).fetchone()
+        assert row[0] == import_graph.EXTRACTION_VERSION
+        assert row[1] != "index"
+
+
+@pytest.mark.parametrize("extension", ["py", "ts"])
+def test_backfill_parses_unchanged_sources_once_above_lru_capacity(
+    repo, monkeypatch, extension
+):
+    for index in range(513):
+        source = (
+            f"VALUE = {index}\n"
+            if extension == "py"
+            else f"export const value = {index};\n"
+        )
+        write(repo, f"file{index:04}.{extension}", source)
+    commit(repo, "513 distinct sources")
+    git(repo, "commit", "--allow-empty", "-m", "unchanged tree one")
+    git(repo, "commit", "--allow-empty", "-m", "unchanged tree two")
+    write(
+        repo,
+        f"file0000.{extension}",
+        "UPDATED = 1\n" if extension == "py" else "export const updated = true;\n",
+    )
+    commit(repo, "change one source")
+    parser = python_imports if extension == "py" else javascript_imports
+    parser.cache_clear()
+    misses = []
+    with closing(Store(db_path_for(repo))) as store:
+        record_snapshot = store.record_graph_snapshot
+
+        def recording_snapshot(*args, **kwargs):
+            misses.append(parser.cache_info().misses)
+            return record_snapshot(*args, **kwargs)
+
+        monkeypatch.setattr(store, "record_graph_snapshot", recording_snapshot)
+        assert backfill(repo, store)[0] == 4
+    assert misses == [513, 513, 513, 514]
+
+
+def test_backfill_parsed_cache_discards_removed_and_excluded_files(repo, monkeypatch):
+    for path in ["kept.py", "removed.py", "excluded.py"]:
+        write(repo, path, f"# {path}\nVALUE = 1\n")
+    commit(repo, "initial files")
+    (repo / "removed.py").unlink()
+    ignores = (repo / ".gitignore").read_text()
+    write(repo, ".gitignore", ignores + "excluded.py\n")
+    commit(repo, "remove and exclude files")
+    write(repo, ".gitignore", ignores)
+    commit(repo, "include file again")
+
+    parse = history.parse
+    parsed_paths = []
+    inventories = []
+
+    def recording_parse(path, source):
+        parsed_paths.append(path)
+        return parse(path, source)
+
+    def recording_graph(snapshot, *, parsed_sources):
+        inventories.append(set(parsed_sources))
+        return ImportGraph(snapshot, parsed_sources=parsed_sources)
+
+    monkeypatch.setattr(history, "parse", recording_parse)
+    monkeypatch.setattr(history, "ImportGraph", recording_graph)
+    with closing(Store(db_path_for(repo))) as store:
+        assert backfill(repo, store)[0] == 3
+    assert inventories == [
+        {"kept.py", "removed.py", "excluded.py"},
+        {"kept.py"},
+        {"kept.py", "excluded.py"},
+    ]
+    assert parsed_paths.count("kept.py") == 1
+    assert parsed_paths.count("removed.py") == 1
+    assert parsed_paths.count("excluded.py") == 2
