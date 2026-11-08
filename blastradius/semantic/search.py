@@ -41,34 +41,17 @@ def _rrf_fuse(ranked_lists: list[list[int]]) -> list[tuple[int, float]]:
     return sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
 
-def hybrid_search(
+def _semantic_candidates(
     store: Store,
     query: str,
-    k: int = 10,
-    as_of_reachable: set | None = None,
-    provider: EmbeddingProvider | None = None,
-) -> list[dict]:
-    """Fuse semantic, FTS, and graph signals with Reciprocal Rank Fusion.
-
-    Returns up to *k* result dicts, each with symbol metadata, rrf_score, and signals.
-    Degrades gracefully: if provider is None or sqlite-vec absent, uses FTS + graph only.
-    If as_of_reachable is provided, restricts to symbols visible at that historical point.
-    """
-    ranked_lists: list[list[int]] = []
-    provenance: dict[int, list[str]] = {}
-
-    def _note(sid: int, signal: str) -> None:
-        provenance.setdefault(sid, []).append(signal)
-
-    # 1. Semantic KNN (optional — requires provider + sqlite-vec)
+    limit: int,
+    provider: EmbeddingProvider | None,
+) -> list[int]:
+    """Retrieve KNN hits when configured; warn and fall back on retrieval failure."""
     if provider is not None and store._has_vec:
         try:
             vec = provider.embed([query])[0]
-            sem_ids = store.semantic_search(vec, k * 2)
-            for sid in sem_ids:
-                _note(sid, "semantic")
-            if sem_ids:
-                ranked_lists.append(sem_ids)
+            return store.semantic_search(vec, limit)
         except Exception as exc:  # noqa: BLE001
             print(f"[blastradius] semantic search skipped: {exc}", file=sys.stderr)
     elif provider is not None and not store._has_vec:
@@ -76,18 +59,36 @@ def hybrid_search(
             "[blastradius] sqlite-vec not available — falling back to FTS + graph search.",
             file=sys.stderr,
         )
+    return []
 
-    # 2. FTS keyword search
+
+def _keyword_candidates(store: Store, query: str, limit: int) -> list[int]:
+    """Retrieve keyword hits; warn and fall back on retrieval failure."""
     try:
-        fts_ids = store.fts_search(query, k * 2)
-        for sid in fts_ids:
-            _note(sid, "fts")
-        if fts_ids:
-            ranked_lists.append(fts_ids)
+        return store.fts_search(query, limit)
     except Exception as exc:  # noqa: BLE001
         print(f"[blastradius] FTS search skipped: {exc}", file=sys.stderr)
+        return []
 
-    # 3. Graph expansion: supplement when primary signals are sparse.
+
+def _collect_candidates(
+    store: Store, query: str, k: int, provider: EmbeddingProvider | None
+) -> tuple[list[list[int]], dict[int, list[str]]]:
+    """Collect rankings and provenance in semantic, keyword, then graph order.
+
+    Graph expansion supplements sparse primary signals, counting overlapping hits
+    separately and using at most five seeds per primary signal.
+    """
+    ranked_lists: list[list[int]] = []
+    provenance: dict[int, list[str]] = {}
+    sem_ids = _semantic_candidates(store, query, k * 2, provider)
+    fts_ids = _keyword_candidates(store, query, k * 2)
+    for signal, ids in (("semantic", sem_ids), ("fts", fts_ids)):
+        for sid in ids:
+            provenance.setdefault(sid, []).append(signal)
+        if ids:
+            ranked_lists.append(ids)
+
     # Skip if FTS (or semantic) already returned enough results — graph neighbours
     # add structural noise that dilutes good keyword/semantic hits.
     primary_hit_count = sum(len(lst) for lst in ranked_lists)
@@ -105,25 +106,24 @@ def hybrid_search(
         graph_ids = store.graph_expand(deduped, k - primary_hit_count)
         for sid in graph_ids:
             if sid not in seen:
-                _note(sid, "graph")
+                provenance.setdefault(sid, []).append("graph")
         if graph_ids:
             ranked_lists.append(graph_ids)
+    return ranked_lists, provenance
 
-    if not ranked_lists:
-        return []
 
-    fused = _rrf_fuse(ranked_lists)
+def _hydrate_and_rerank(
+    store: Store,
+    query: str,
+    k: int,
+    fused: list[tuple[int, float]],
+    provenance: dict[int, list[str]],
+) -> list[dict]:
+    """Hydrate up to 3k visible hits, boost paths/exports, then keep the best k.
 
-    # 4. Temporal filter
-    if as_of_reachable is not None:
-        fused = [
-            (sid, score)
-            for sid, score in fused
-            if store.symbol_visible_at(sid, as_of_reachable)
-        ]
-
-    # 5. Hydrate and rerank: boost exported symbols and those whose file path
-    # contains query stems (auth.ts ranks above feedback/route.ts for "authentication").
+    Missing symbols are skipped without replenishment. Sorting preserves fused
+    order for ties in the rounded, boosted scores.
+    """
     stems = _query_stems(query)
     hydrated: list[tuple[float, dict]] = []
     for sid, score in fused[: k * 3]:  # oversample so rerank can promote better hits
@@ -139,3 +139,33 @@ def hybrid_search(
 
     hydrated.sort(key=lambda x: x[0], reverse=True)
     return [sym for _, sym in hydrated[:k]]
+
+
+def hybrid_search(
+    store: Store,
+    query: str,
+    k: int = 10,
+    as_of_reachable: set | None = None,
+    provider: EmbeddingProvider | None = None,
+) -> list[dict]:
+    """Fuse semantic, FTS, and graph signals with Reciprocal Rank Fusion.
+
+    Returns up to *k* result dicts, each with symbol metadata, rrf_score, and signals.
+    Degrades gracefully: if provider is None or sqlite-vec absent, uses FTS + graph only.
+    If as_of_reachable is provided, restricts to symbols visible at that historical point.
+    """
+    ranked_lists, provenance = _collect_candidates(store, query, k, provider)
+    if not ranked_lists:
+        return []
+
+    fused = _rrf_fuse(ranked_lists)
+
+    # Filter before hydration's oversampling limit, without fetching replacements.
+    if as_of_reachable is not None:
+        fused = [
+            (sid, score)
+            for sid, score in fused
+            if store.symbol_visible_at(sid, as_of_reachable)
+        ]
+
+    return _hydrate_and_rerank(store, query, k, fused, provenance)
