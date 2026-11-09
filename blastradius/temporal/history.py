@@ -13,7 +13,7 @@ from collections import OrderedDict
 from pathlib import Path, PurePosixPath
 
 from blastradius.import_graph import ImportGraph, Snapshot, report_diagnostics
-from blastradius.import_graph.parsing import Parsed, parse
+from blastradius.import_graph.parsing import ParsedSource, parse
 from blastradius.import_graph.snapshot import SOURCE_EXTENSIONS, skipped
 
 # ── git plumbing helpers ──────────────────────────────────────────────────────
@@ -175,9 +175,8 @@ def backfill(
     edge_last_seen_alive: dict[tuple, str] = {}
 
     blob_cache: OrderedDict[str, bytes] = OrderedDict()
-    parsed_cache: dict[str, tuple[str, Parsed]] = {}
+    parsed_cache: dict[str, tuple[str, ParsedSource]] = {}
     diagnostics: set[str] = set()
-    unsupported: set[str] = set()
 
     processed = 0
 
@@ -200,6 +199,7 @@ def backfill(
             and (
                 PurePosixPath(path).suffix.lower()
                 in SOURCE_EXTENSIONS | {".json", ".jsonc"}
+                or PurePosixPath(path).name in {"go.mod", "go.work", "Cargo.toml"}
                 or path == ".gitignore"
             )
         ]
@@ -245,11 +245,6 @@ def backfill(
         while len(blob_cache) > 512:
             blob_cache.popitem(last=False)
         diagnostics.update(graph.diagnostics)
-        unsupported.update(
-            PurePosixPath(path).suffix
-            for path in snapshot.files
-            if PurePosixPath(path).suffix in {".go", ".rs"}
-        )
         store.record_graph_snapshot(h, nodes, edges)
         for source, target in edges:
             key = (source, target, "imports")
@@ -266,11 +261,6 @@ def backfill(
     store.apply_edge_temporal(edge_first_seen, edge_last_seen_alive)
 
     report_diagnostics(diagnostics)
-    if unsupported:
-        print(
-            "History import coverage: Python and JS/TS/Vue; Go/Rust dependencies are not backfilled.",
-            file=sys.stderr,
-        )
     files_tracked = len(file_first_seen)
     print(
         f"Backfill complete: {processed} commits, {files_tracked} files tracked.",

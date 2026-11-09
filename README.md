@@ -327,7 +327,7 @@ the importer is unchanged. Identical graphs share snapshot storage.
 Local configuration files outside the prefetched extensions are read on demand
 and cached through the same Git blob reader.
 
-Historical import extraction covers **Python and JavaScript/TypeScript/Vue**.
+Historical import extraction covers **Python, JavaScript/TypeScript/Vue, Go, and Rust**.
 Python resolution includes relative imports, named child modules, package
 initializers, and conventional `src/` layouts. JS/TS uses syntax parsing for
 imports, reexports, and literal `require()`/dynamic imports; it supports local
@@ -339,9 +339,36 @@ across builds, rather than a compiler or runtime simulation.
 Computed imports, installed-package configuration, Python runtime import hooks,
 and generated source/build-output remapping are not resolved. Parse failures,
 unsupported computed imports, and unresolved local mappings produce bounded
-warnings on stderr. Go/Rust history extraction is a separate follow-up; normal
-indexing retains its existing language support. CSS files can be import targets;
+warnings on stderr. CSS files can be import targets;
 historical CSS-to-CSS extraction is not included.
+
+Go retains **package-directory nodes** (including `.` at the repository root).
+Resolution uses the snapshot's `go.mod`, nearest `go.work`, and local replacements.
+Only explicitly listed `go.work use` modules participate in that workspace;
+nonmembers are still indexed independently. Without workspace membership or a
+local replacement, a neighboring repository module is treated as external.
+Workspace replacements override module replacements; conflicting member
+replacements produce diagnostics instead of guessed edges. Nested modules need
+separate membership. Module-version selection and build-tag evaluation are not
+simulated.
+
+Rust retains **source-file nodes** and resolves nested/inline module declarations,
+`#[path]` overrides, uses/reexports, and local Cargo dependencies, including aliases
+and inherited workspace dependencies. Custom Cargo roots and conventional targets
+are discovered from snapshot files. All statically visible conditional module
+variants are retained; feature/target conditions are not evaluated. Macro-generated
+dependencies, procedural macros, generated sources, and remote dependencies are
+not expanded. Absolute manifest paths and paths outside the repository are
+unsupported for both languages; neither resolver runs builds or downloads packages.
+
+After upgrading from Python/JS-only historical extraction, reindex HEAD and rerun
+history for the range you need. Existing snapshot tables are reused, and snapshots
+from the older extraction version are refreshed automatically during backfill:
+
+```bash
+uv run blastradius analyze .
+uv run blastradius history . --max-commits 1000
+```
 
 `impact --as-of` and MCP `temporal_impact` use exact commit membership, so removed
 or reintroduced dependencies and branch histories do not depend on one lifetime
@@ -973,7 +1000,9 @@ features remain optional:
 | `sqlite-vec` | Semantic vector search in `blastradius search` and `semantic_search` MCP tool | `uv tool install --force 'blastradius-cli[semantic]'` |
 | `watchdog` | `--watch` file change detection | `uv tool install --force 'blastradius-cli[watch]'` |
 | `PyYAML` | Better Docker Compose / CI YAML parsing | `uv tool install --force 'blastradius-cli[yaml]'` |
-| `tomli` | Rust `Cargo.toml` on Python < 3.11 | `uv tool install --force 'blastradius-cli[toml]'` |
+
+Cargo manifest parsing is included by default: Python 3.11+ uses `tomllib`, and
+Python 3.10 installs `tomli`. The existing `toml` extra remains a compatibility alias.
 
 These commands replace the installed tool's configuration with the requested
 extras; they do not accumulate extras from previous commands. Combine everything

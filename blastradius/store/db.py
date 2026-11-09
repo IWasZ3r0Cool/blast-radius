@@ -481,7 +481,7 @@ class Store:
         nodes: set[str],
         edges: set[tuple[str, str]],
         *,
-        coverage: str = "python,javascript,typescript,vue",
+        coverage: str | None = None,
     ) -> None:
         """Atomically associate an exact commit with deduplicated graph membership.
 
@@ -490,7 +490,10 @@ class Store:
         Callers supply the intended node/edge membership; edges with missing
         endpoints raise ValueError before any writes or snapshot replacement.
         """
-        from blastradius.import_graph import EXTRACTION_VERSION
+        from blastradius.import_graph import EXTRACTION_VERSION, HISTORY_COVERAGE
+
+        if coverage is None:
+            coverage = HISTORY_COVERAGE
 
         _validate_snapshot_edges(nodes, edges)
         payload = json.dumps(
@@ -501,7 +504,7 @@ class Store:
         snapshot_id = hashlib.sha256(payload.encode()).hexdigest()
         with self._conn:
             # A normal index can contain other languages and cross-language links
-            # that Python/JS-only backfill must not overwrite.
+            # that language-limited backfill must not overwrite.
             existing = self._conn.execute(
                 "SELECT g.coverage, g.extraction_version FROM commit_snapshots c "
                 "JOIN graph_snapshots g ON g.id=c.snapshot_id WHERE c.commit_hash=?",

@@ -8,7 +8,7 @@ import os
 import posixpath
 import re
 from collections.abc import Callable, Iterable
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 SKIP_DIRS = {
     "__pycache__",
@@ -32,7 +32,7 @@ JS_EXTENSIONS = frozenset(
     {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".vue"}
 )
 STYLE_EXTENSIONS = frozenset({".css", ".scss", ".sass", ".less", ".styl"})
-SOURCE_EXTENSIONS = JS_EXTENSIONS | {".py"}
+SOURCE_EXTENSIONS = JS_EXTENSIONS | {".py", ".go", ".rs"}
 
 
 def ignore_patterns(content: str) -> list[re.Pattern]:
@@ -61,6 +61,26 @@ def normalize(path: str) -> str | None:
     if result.startswith(("/", "../")) or result == "..":
         return None
     return result
+
+
+def local_path(
+    base: PurePosixPath, value: str, diagnostics: set[str]
+) -> PurePosixPath | None:
+    """Resolve a manifest/module path lexically, never consulting the host."""
+    portable = value.replace("\\", "/")
+    normalized = normalize(posixpath.join(base.as_posix(), portable))
+    if PureWindowsPath(value).drive or portable.startswith("/") or normalized is None:
+        diagnostics.add(f"{base}: unsupported repository path {value!r}")
+        return None
+    return PurePosixPath(normalized)
+
+
+def source_text(source: bytes) -> str:
+    return (
+        source.decode("utf-8-sig", errors="replace")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
 
 
 class Snapshot:

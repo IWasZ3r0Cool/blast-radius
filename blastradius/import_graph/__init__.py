@@ -2,17 +2,19 @@
 # Licensed under the Apache License, Version 2.0
 from __future__ import annotations
 
-"""Shared Python/JS dependency analysis over working files or historical blobs."""
+"""Shared multi-language dependency analysis over working files or historical blobs."""
 
 import posixpath
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 import json5
 
-from .parsing import Parsed, Reference, parse
+from .go import GoGraph
+from .parsing import ParsedSource, Reference, parse
+from .results import ImportResult as ImportResult
+from .rust import RustGraph
 from .snapshot import (
     JS_EXTENSIONS,
     SOURCE_EXTENSIONS,
@@ -21,7 +23,8 @@ from .snapshot import (
     normalize,
 )
 
-EXTRACTION_VERSION = "2"
+EXTRACTION_VERSION = "3"
+HISTORY_COVERAGE = "python,javascript,typescript,vue,go,rust"
 _EXTENSIONS = (
     ".ts",
     ".tsx",
@@ -41,16 +44,6 @@ _EXTENSIONS = (
 )
 
 
-@dataclass(frozen=True)
-class ImportResult:
-    """File-level references; configuration diagnostics also live on ImportGraph."""
-
-    count: int
-    targets: tuple[str, ...]
-    external: tuple[str, ...]
-    diagnostics: tuple[str, ...]
-
-
 def report_diagnostics(diagnostics) -> None:
     """Keep graph/JSON output clean and bound diagnostics on large histories."""
     messages = sorted(set(diagnostics))
@@ -64,7 +57,10 @@ class ImportGraph:
     """Resolve imports solely against a snapshot, with no installed-package lookup."""
 
     def __init__(
-        self, snapshot: Snapshot, *, parsed_sources: Mapping[str, Parsed] | None = None
+        self,
+        snapshot: Snapshot,
+        *,
+        parsed_sources: Mapping[str, ParsedSource] | None = None,
     ):
         # Callers may reuse syntax from this snapshot; resolution stays local.
         self._parsed_sources = parsed_sources if parsed_sources is not None else {}
@@ -441,12 +437,22 @@ class ImportGraph:
         nodes = {
             path
             for path in self.files
-            if PurePosixPath(path).suffix in SOURCE_EXTENSIONS | STYLE_EXTENSIONS
+            if PurePosixPath(path).suffix
+            in (SOURCE_EXTENSIONS - {".go", ".rs"}) | STYLE_EXTENSIONS
         }
         edges = set()
         for path in sorted(nodes):
-            if PurePosixPath(path).suffix in SOURCE_EXTENSIONS:
+            if PurePosixPath(path).suffix in SOURCE_EXTENSIONS - {".go", ".rs"}:
                 edges.update((path, target) for target in self.analyze(path).targets)
+        for language in (GoGraph, RustGraph):
+            graph = language(self.snapshot, parsed_sources=self._parsed_sources)
+            nodes.update(graph.results)
+            edges.update(
+                (node_id, target)
+                for node_id, result in graph.results.items()
+                for target in result.imports.targets
+            )
+            self.diagnostics.update(graph.diagnostics)
         return nodes, edges
 
 
