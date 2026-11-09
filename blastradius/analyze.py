@@ -24,7 +24,8 @@ from blastradius.analyzers import (
 from blastradius.analyzers.cross_lang_analyzer import find_api_boundaries
 from blastradius.analyzers.monorepo_analyzer import assign_packages, detect_workspaces
 
-_SKIP = {
+# Fixed exclusions for language detection, distinct from analyzer collection rules.
+_DETECTION_SKIP_DIRS = {
     "__pycache__",
     ".venv",
     "venv",
@@ -40,13 +41,13 @@ _SKIP = {
 }
 
 
-def _any_match(root: Path, globs: list) -> bool:
-    return any(
-        p
-        for g in globs
-        for p in root.rglob(g)
-        if not any(part in _SKIP for part in p.parts)
-    )
+def _any_match(root: Path, globs: list[str]) -> bool:
+    """Find the first glob match with no excluded name in its full path."""
+    for glob in globs:
+        for path in root.rglob(glob):
+            if _DETECTION_SKIP_DIRS.isdisjoint(path.parts):
+                return True
+    return False
 
 
 def detect_languages(root: Path) -> list:
