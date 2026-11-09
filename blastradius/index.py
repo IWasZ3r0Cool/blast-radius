@@ -13,6 +13,7 @@ import json
 import subprocess
 import sys
 from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 
 from blastradius.analyze import analyze
@@ -181,25 +182,36 @@ def git_resolve(root: Path, ref: str) -> str | None:
         return None
 
 
-def _embed_new_symbols(store) -> None:
-    """Embed symbols that lack a vector entry, if an embedding endpoint is configured.
+@dataclass(frozen=True)
+class _EmbeddingConfig:
+    endpoint: str
+    model: str
+    dims: int
 
-    Reads BLASTRADIUS_EMBEDDING_ENDPOINT / _MODEL / _DIMS from env.
-    Silently skips if any required env var is missing or if the call fails.
-    """
+
+def _embedding_config() -> _EmbeddingConfig | None:
+    """Read embedding settings, returning None for missing or invalid values."""
     import os
 
     endpoint = os.environ.get("BLASTRADIUS_EMBEDDING_ENDPOINT", "")
     model = os.environ.get("BLASTRADIUS_EMBEDDING_MODEL", "")
     dims_str = os.environ.get("BLASTRADIUS_EMBEDDING_DIMS", "")
     if not (endpoint and model and dims_str):
-        return
+        return None
     try:
         dims = int(dims_str)
     except ValueError:
+        return None
+    return _EmbeddingConfig(endpoint=endpoint, model=model, dims=dims)
+
+
+def _embed_new_symbols(store) -> None:
+    """Embed missing vectors; skip invalid configuration and warn on embedding failures."""
+    config = _embedding_config()
+    if config is None:
         return
 
-    if not store.init_vectors(dims):
+    if not store.init_vectors(config.dims):
         return
 
     pairs = store.symbols_needing_embeddings()
@@ -209,12 +221,14 @@ def _embed_new_symbols(store) -> None:
     try:
         from blastradius.semantic.provider import OpenAIEmbeddingProvider
 
-        provider = OpenAIEmbeddingProvider(endpoint=endpoint, model=model, dims=dims)
+        provider = OpenAIEmbeddingProvider(
+            endpoint=config.endpoint, model=config.model, dims=config.dims
+        )
         ids = [p[0] for p in pairs]
         texts = [p[1] for p in pairs]
         vecs = provider.embed(texts)
         store.upsert_embeddings(list(zip(ids, vecs)))
-        store.set_meta("embedding_model", model)
+        store.set_meta("embedding_model", config.model)
         store._conn.commit()
         print(f"Embedded {len(ids)} symbol(s)", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001
