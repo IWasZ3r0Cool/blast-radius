@@ -607,13 +607,27 @@ def test_backfill_parses_unchanged_sources_once_above_lru_capacity(
     assert misses == [513, 513, 513, 514]
 
 
-def test_backfill_parsed_cache_discards_removed_and_excluded_files(repo, monkeypatch):
-    for path in ["kept.py", "removed.py", "excluded.py"]:
-        write(repo, path, f"# {path}\nVALUE = 1\n")
+@pytest.mark.parametrize("extension", ["py", "go", "rs"])
+def test_backfill_parsed_cache_discards_removed_and_excluded_files(
+    repo, monkeypatch, extension
+):
+    kept, removed, excluded = (
+        f"{name}.{extension}" for name in ("kept", "removed", "excluded")
+    )
+    for path in [kept, removed, excluded]:
+        write(
+            repo,
+            path,
+            {
+                "py": f"# {path}\nVALUE = 1\n",
+                "go": "package demo\n",
+                "rs": "pub struct Item;\n",
+            }[extension],
+        )
     commit(repo, "initial files")
-    (repo / "removed.py").unlink()
+    (repo / removed).unlink()
     ignores = (repo / ".gitignore").read_text()
-    write(repo, ".gitignore", ignores + "excluded.py\n")
+    write(repo, ".gitignore", ignores + excluded + "\n")
     commit(repo, "remove and exclude files")
     write(repo, ".gitignore", ignores)
     commit(repo, "include file again")
@@ -635,10 +649,10 @@ def test_backfill_parsed_cache_discards_removed_and_excluded_files(repo, monkeyp
     with closing(Store(db_path_for(repo))) as store:
         assert backfill(repo, store)[0] == 3
     assert inventories == [
-        {"kept.py", "removed.py", "excluded.py"},
-        {"kept.py"},
-        {"kept.py", "excluded.py"},
+        {kept, removed, excluded},
+        {kept},
+        {kept, excluded},
     ]
-    assert parsed_paths.count("kept.py") == 1
-    assert parsed_paths.count("removed.py") == 1
-    assert parsed_paths.count("excluded.py") == 2
+    assert parsed_paths.count(kept) == 1
+    assert parsed_paths.count(removed) == 1
+    assert parsed_paths.count(excluded) == 2

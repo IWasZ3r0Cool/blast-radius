@@ -9,6 +9,9 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
+from .go import GoParsed, parse_go
+from .rust import RustParsed, parse_rust
+
 
 @dataclass(frozen=True)
 class Reference:
@@ -22,6 +25,9 @@ class Reference:
 class Parsed:
     references: tuple[Reference, ...]
     diagnostics: tuple[str, ...] = ()
+
+
+ParsedSource = Parsed | GoParsed | RustParsed
 
 
 @lru_cache(maxsize=512)
@@ -127,8 +133,12 @@ def javascript_imports(source: bytes, dialect: str = "js") -> Parsed:
 _SCRIPTS = re.compile(rb"<script\b([^>]*)>(.*?)</script\s*>", re.DOTALL | re.IGNORECASE)
 
 
-def parse(path: str, source: bytes) -> Parsed:
+def parse(path: str, source: bytes) -> ParsedSource:
     extension = path.rsplit(".", 1)[-1].lower()
+    if extension == "go":
+        return parse_go(source)
+    if extension == "rs":
+        return parse_rust(source)
     if extension == "py":
         return python_imports(source)
     if extension == "vue":
