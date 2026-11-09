@@ -1,6 +1,8 @@
-"""Install / uninstall a pre-commit hook that reports blast radius for staged files."""
-
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
 from __future__ import annotations
+
+"""Install / uninstall a pre-commit hook that reports blast radius for staged files."""
 
 import stat
 import sys
@@ -34,7 +36,7 @@ fi
 WARNED=0
 while IFS= read -r FILE; do
   if [ -z "$FILE" ]; then continue; fi
-  OUTPUT=$(blastradius impact "$FILE" --index "$INDEX" 2>/dev/null)
+  OUTPUT=$(blastradius impact "$FILE" --index "$INDEX" --guidance-threshold "$THRESHOLD" 2>/dev/null)
   if [ $? -ne 0 ]; then continue; fi
   SCORE=$(echo "$OUTPUT" | grep -oP 'Blast Score: \\K[0-9.]+')
   if [ -z "$SCORE" ]; then continue; fi

@@ -62,6 +62,10 @@ TOOLS = [
                     "type": "string",
                     "description": "Path to blastradius.json. Auto-discovered if omitted.",
                 },
+                "guidance_threshold": {
+                    "type": "integer",
+                    "description": "Minimum blast score for mitigation suggestions in the report. Default: 10.",
+                },
             },
             "required": ["file_path"],
         },
@@ -197,6 +201,14 @@ TOOLS = [
                     "type": "string",
                     "description": "Path to .blastradius/index.db. Defaults to --repo or cwd discovery.",
                 },
+                "guidance_threshold": {
+                    "type": "integer",
+                    "description": (
+                        "Minimum blast score for mitigation suggestions in the current report. "
+                        "Default: 10. Historical (as_of) results contain only metrics; "
+                        "this setting does not affect them."
+                    ),
+                },
             },
             "required": ["file"],
         },
@@ -279,7 +291,9 @@ def _call_get_impact(params: dict, artifacts: Artifacts) -> dict:
         raise ValueError(f"No blast data for {file_id}")
 
     total = len([n for n in data["nodes"] if n.get("type") != "import"])
-    report = format_markdown(file_id, blast, total)
+    report = format_markdown(
+        file_id, blast, total, guidance_threshold=params.get("guidance_threshold", 10)
+    )
     return {"file": file_id, "report": report, "blast_score": blast["blast_score"]}
 
 
@@ -479,7 +493,9 @@ def _call_temporal_impact(params: dict, artifacts: Artifacts) -> dict:
     if not blast:
         raise ValueError(f"No blast data for {fid2}")
     total = len([n for n in data["nodes"] if n.get("type") != "import"])
-    report = format_markdown(fid2, blast, total)
+    report = format_markdown(
+        fid2, blast, total, guidance_threshold=params.get("guidance_threshold", 10)
+    )
     return {
         "file": fid2,
         "blast_score": blast["blast_score"],

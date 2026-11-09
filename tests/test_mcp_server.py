@@ -401,6 +401,21 @@ def test_notifications_do_not_produce_replies(client):
     "name, arguments, field",
     [
         ("get_impact", {}, "file_path"),
+        (
+            "get_impact",
+            {"file_path": "models.py", "guidance_threshold": "10"},
+            "guidance_threshold",
+        ),
+        (
+            "get_impact",
+            {"file_path": "models.py", "guidance_threshold": True},
+            "guidance_threshold",
+        ),
+        (
+            "temporal_impact",
+            {"file": "models.py", "guidance_threshold": 1.5},
+            "guidance_threshold",
+        ),
         ("graph_query", {"file": 17}, "file"),
         ("graph_query", {"file": "models.py", "depth": -1}, "depth"),
         ("graph_query", {"file": "models.py", "depth": True}, "depth"),
@@ -422,6 +437,30 @@ def test_unknown_tool_is_a_protocol_error(client):
     response = client.call_tool("missing_tool", {})
     assert response["error"]["code"] == -32602
     assert "missing_tool" in response["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "tool, params",
+    [
+        ("get_impact", {"file_path": "models.py"}),
+        ("temporal_impact", {"file": "models.py"}),
+    ],
+)
+def test_report_guidance_threshold_over_mcp(client, repo, tool, params):
+    params = {**params, "guidance_threshold": 0}
+    # Use explicit artifacts because the server starts outside the indexed repository.
+    if tool == "get_impact":
+        params["index_path"] = str(repo / "blastradius.json")
+    else:
+        params["db_path"] = str(repo / ".blastradius/index.db")
+    enabled = payload(client.call_tool(tool, params))
+    suppressed = payload(client.call_tool(tool, {**params, "guidance_threshold": 100}))
+    assert "Mitigation suggestions" in enabled["report"]
+    assert "No downstream test candidates were identified" in enabled["report"]
+    assert "Mitigation suggestions" not in suppressed["report"]
+    assert {k: v for k, v in enabled.items() if k != "report"} == {
+        k: v for k, v in suppressed.items() if k != "report"
+    }
 
 
 def test_modern_discovery_and_every_advertised_revision(tmp_path):
