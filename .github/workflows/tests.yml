@@ -40,6 +40,14 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install locked dependencies
         run: uv sync --locked --extra dev
+      - name: Use Git for Windows Bash
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $gitRoot = Split-Path (Split-Path (Get-Command git.exe).Source -Parent) -Parent
+          $bash = Join-Path $gitRoot 'bin\bash.exe'
+          if (-not (Test-Path $bash)) { throw "Git for Windows Bash not found: $bash" }
+          Split-Path $bash -Parent >> $env:GITHUB_PATH
       - name: Run tests
         run: uv run --locked pytest
       - name: Lint

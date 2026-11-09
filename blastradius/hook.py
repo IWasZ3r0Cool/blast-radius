@@ -101,7 +101,7 @@ def install(
     )
 
     hook_path.parent.mkdir(exist_ok=True)
-    hook_path.write_text(script)
+    hook_path.write_bytes(script.encode("utf-8"))
     hook_path.chmod(
         hook_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
     )
