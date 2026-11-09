@@ -213,10 +213,34 @@ blastradius symbols ./myapp --inline --claude-md
 ### `blastradius impact`
 
 ```bash
-blastradius impact FILE [--index PATH] [--out FILE] [--json] [--as-of REF]
+blastradius impact FILE [--index PATH] [--out FILE] [--json] [--as-of REF] [--guidance-threshold N]
 ```
 
 Shows the blast-radius impact for a specific file: direct dependents, transitive dependents, blast score, and risk level.
+
+Formatted reports append mitigation suggestions at a blast score of **10** or
+higher. Use integer `--guidance-threshold N` to change when suggestions appear;
+this does not change scoring or risk labels. CLI text (including `--as-of`),
+Markdown reports, and MCP report text share this guidance. Raw CLI JSON fields
+remain unchanged.
+
+Guidance lists sorted downstream **test candidates** to review and run, with
+regression cases added where needed. Candidates are source files beneath `test/`,
+`tests/`, or `__tests__/`, or with names matching `test_*`, `*_test`, `*.test.*`, or
+`*.spec.*`. This conservative convention check is incomplete: helpers may match,
+and graph reachability does not establish test coverage. If none match, the report
+states that no candidates were identified; it does not claim tests are absent.
+Only paths represented in the graph can be listed; package-level nodes and inline
+tests are not expanded into test file paths.
+
+When suggestions are enabled and the score is at least **20** with **more than 8**
+direct dependents, the report also suggests considering an interface and links to
+the [extract-interface guide](docs/refactor-patterns.md#extract-interface). This is
+an option to assess, not a guarantee of a safe refactor.
+
+MCP `get_impact` and current-state `temporal_impact` accept optional integer
+`guidance_threshold` (default `10`). Historical MCP `temporal_impact` results
+remain metrics-only, so the parameter does not affect those results.
 
 Exact indexed paths, including a leading `./`, take priority. Shortened or suffix
 paths must identify one file; ambiguous matches list the candidates and exit with
@@ -647,6 +671,11 @@ blastradius install-hook [--repo PATH] [--threshold N] [--strict] [--remove]
 ```
 
 Installs a git pre-commit hook that warns when staged files exceed the blast score threshold.
+
+The hook passes its warning threshold to the impact report's mitigation guidance,
+so reports shown by the hook include next steps at the same threshold. Existing
+installations must re-run `blastradius install-hook` with their desired options to
+update the generated hook. Warning and strict-mode behavior are unchanged.
 
 | Flag | Default | Description |
 |------|---------|-------------|

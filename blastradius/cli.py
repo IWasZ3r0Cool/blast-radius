@@ -124,6 +124,7 @@ def _cmd_impact(args: argparse.Namespace) -> None:
     from blastradius.reporter import format_markdown, format_stdout
 
     as_of = getattr(args, "as_of", None)
+    guidance_threshold = getattr(args, "guidance_threshold", 10)
 
     if as_of:
         # ── temporal path: query DB for historical blast radius ────────────────
@@ -205,7 +206,11 @@ def _cmd_impact(args: argparse.Namespace) -> None:
             )
         else:
             print(f"[as-of {as_of[:12]}]  ", end="")
-            print(format_stdout(file_id, blast, total))
+            print(
+                format_stdout(
+                    file_id, blast, total, guidance_threshold=guidance_threshold
+                )
+            )
         return
 
     # ── current-HEAD path (unchanged) ─────────────────────────────────────────
@@ -244,7 +249,9 @@ def _cmd_impact(args: argparse.Namespace) -> None:
     total = len([n for n in data["nodes"] if n.get("type") != "import"])
 
     if args.out:
-        report = format_markdown(file_id, blast, total)
+        report = format_markdown(
+            file_id, blast, total, guidance_threshold=guidance_threshold
+        )
         Path(args.out).write_text(report)
         print(f"Impact report written to {args.out}")
     elif args.json:
@@ -262,7 +269,9 @@ def _cmd_impact(args: argparse.Namespace) -> None:
             )
         )
     else:
-        print(format_stdout(file_id, blast, total))
+        print(
+            format_stdout(file_id, blast, total, guidance_threshold=guidance_threshold)
+        )
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:
@@ -868,6 +877,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_impact.add_argument("--out", help="Write markdown report to this file")
     p_impact.add_argument("--json", action="store_true", help="Output raw JSON")
+    p_impact.add_argument(
+        "--guidance-threshold",
+        type=int,
+        default=10,
+        help="Minimum blast score for mitigation suggestions in formatted reports (default: 10)",
+    )
     p_impact.add_argument(
         "--as-of",
         dest="as_of",
