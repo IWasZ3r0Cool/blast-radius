@@ -28,6 +28,7 @@ from blastradius.index import (
 )
 from blastradius.reporter import format_markdown
 from blastradius.symbols import SYMBOL_INDEX_FILENAME
+from blastradius.temporal.changes import filter_changed_since
 
 TOOLS = [
     {
@@ -545,33 +546,11 @@ def _call_changed_since(params: dict, artifacts: Artifacts) -> dict:
     last_indexed = store.get_meta("last_indexed_commit") or ""
     result["ref"] = ref
 
-    # Add content-modified files from git (files changed but not added/removed structurally)
-    modified = git_modified(repo_root, full_hash)
-    added_set = set(result.get("added_files", []))
-    removed_set = set(result.get("removed_files", []))
-    result["modified_files"] = [
-        f for f in modified if f not in added_set and f not in removed_set
-    ]
-
-    # Filter edges to those touching the changed file set — whole-graph edge noise otherwise.
-    touched = added_set | removed_set | set(result["modified_files"])
-    all_ae = result["added_edges"]
-    all_re = result["removed_edges"]
-    ae_filtered = [
-        e for e in all_ae if e["source"] in touched or e["target"] in touched
-    ]
-    re_filtered = [
-        e for e in all_re if e["source"] in touched or e["target"] in touched
-    ]
-    result["added_edges"] = ae_filtered
-    result["removed_edges"] = re_filtered
-    suppressed = (len(all_ae) - len(ae_filtered)) + (len(all_re) - len(re_filtered))
-    if suppressed:
-        result["suppressed_edge_count"] = suppressed
+    filter_changed_since(result, git_modified(repo_root, full_hash))
 
     analyze_origin_count = sum(
         1
-        for e in ae_filtered
+        for e in result["added_edges"]
         if last_indexed and e.get("first_seen_commit") == last_indexed
     )
     if analyze_origin_count:

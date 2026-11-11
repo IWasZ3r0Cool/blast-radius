@@ -14,10 +14,20 @@ import re
 import sqlite3
 import struct
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = "4"
+
+
+@dataclass(frozen=True)
+class GraphSnapshot:
+    paths: set[str]
+    edges: set[tuple[str, str]]
+    coverage: str
+    extraction_version: str
+
 
 # sqlite-vec is an optional C extension; absence is a graceful degradation, not an error.
 try:
@@ -747,6 +757,31 @@ class Store:
             )
         ]
 
+    def snapshot_graph(self, commit_hash: str) -> GraphSnapshot | None:
+        """Read an exact commit graph with the metadata needed to compare it."""
+        row = self._conn.execute(
+            "SELECT g.id, g.coverage, g.extraction_version FROM commit_snapshots c "
+            "JOIN graph_snapshots g ON g.id=c.snapshot_id WHERE c.commit_hash=?",
+            (commit_hash,),
+        ).fetchone()
+        if row is None:
+            return None
+        snapshot_id, coverage, version = row
+        paths = {
+            path
+            for (path,) in self._conn.execute(
+                "SELECT path FROM snapshot_nodes WHERE snapshot_id=?", (snapshot_id,)
+            )
+        }
+        edges = {
+            (source, target)
+            for source, target in self._conn.execute(
+                "SELECT source, target FROM snapshot_edges WHERE snapshot_id=?",
+                (snapshot_id,),
+            )
+        }
+        return GraphSnapshot(paths, edges, coverage, version)
+
     def as_of_impact(
         self, file_path: str, reachable: set, *, commit_hash: str | None = None
     ) -> dict | None:
@@ -761,26 +796,13 @@ class Store:
         )
 
         if commit_hash is not None:
-            row = self._conn.execute(
-                "SELECT snapshot_id FROM commit_snapshots WHERE commit_hash=?",
-                (commit_hash,),
-            ).fetchone()
-            if row is None:
+            graph = self.snapshot_graph(commit_hash)
+            if graph is None:
                 return None
-            snapshot_id = row[0]
-            nodes = [
-                {"id": row[0]}
-                for row in self._conn.execute(
-                    "SELECT path FROM snapshot_nodes WHERE snapshot_id=? ORDER BY path",
-                    (snapshot_id,),
-                )
-            ]
+            nodes = [{"id": path} for path in sorted(graph.paths)]
             links = [
-                {"source": row[0], "target": row[1]}
-                for row in self._conn.execute(
-                    "SELECT source, target FROM snapshot_edges WHERE snapshot_id=? ORDER BY source, target",
-                    (snapshot_id,),
-                )
+                {"source": source, "target": target}
+                for source, target in sorted(graph.edges)
             ]
             return compute_blast_radius(nodes, links).get(file_path)
 

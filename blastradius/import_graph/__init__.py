@@ -23,7 +23,7 @@ from .snapshot import (
     normalize,
 )
 
-EXTRACTION_VERSION = "3"
+EXTRACTION_VERSION = "4"
 HISTORY_COVERAGE = "python,javascript,typescript,vue,go,rust"
 _EXTENSIONS = (
     ".ts",

@@ -7,10 +7,11 @@ from __future__ import annotations
 Dependency rule: must not import from blastradius.graph or blastradius.semantic.
 """
 
+import os
 import subprocess
 import sys
 from collections import OrderedDict
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from blastradius.import_graph import ImportGraph, Snapshot, report_diagnostics
 from blastradius.import_graph.parsing import ParsedSource, parse
@@ -75,18 +76,39 @@ def git_log(
     return commits
 
 
-def git_ls_tree(root: Path, commit_hash: str) -> dict[str, str]:
-    """Return {repo_relative_path: blob_hash} for all files at commit."""
-    out = _run(["git", "ls-tree", "-rz", "--full-tree", commit_hash], root)
+def _tree_blobs(root: Path, commit_hash: str) -> dict[str, tuple[str, str]]:
+    """Read path -> (mode, blob hash) for regular files and symlinks."""
+    result = subprocess.run(
+        ["git", "ls-tree", "-rz", "--full-tree", commit_hash],
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=60,
+        check=True,
+    )
     tree = {}
-    for entry in out.split("\0"):
-        if "\t" not in entry:
+    for entry in result.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        if not entry:
             continue
         meta, path = entry.split("\t", 1)
-        parts = meta.split()
-        if len(parts) == 3 and parts[0] in {"100644", "100755"} and parts[1] == "blob":
-            tree[path] = parts[2]
+        mode, kind, blob_hash = meta.split()
+        if kind == "blob" and mode in {"100644", "100755", "120000"}:
+            tree[path] = (mode, blob_hash)
     return tree
+
+
+def git_ls_tree(root: Path, commit_hash: str) -> dict[str, str]:
+    """Return the regular-file blobs used by the historical import extractor."""
+    return {
+        path: blob
+        for path, (mode, blob) in _tree_blobs(root, commit_hash).items()
+        if mode != "120000"
+    }
+
+
+def git_tracked_paths(root: Path, commit_hash: str) -> set[str]:
+    """Return tracked file and symlink paths, excluding submodule entries."""
+    return set(_tree_blobs(root, commit_hash))
 
 
 def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, bytes]:
@@ -141,7 +163,130 @@ def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, bytes]:
     return results
 
 
+def materialize_commit(root: Path, commit_hash: str, destination: Path) -> None:
+    """Write tracked blobs into an empty temporary directory for full analysis."""
+    tree = list(_tree_blobs(root, commit_hash).items())
+    symlinks = []
+    batch_size = 128
+    for start in range(0, len(tree), batch_size):
+        batch = tree[start : start + batch_size]
+        contents = _git_cat_file_batch(root, sorted({blob for _, (_, blob) in batch}))
+        for path, (mode, blob) in batch:
+            parts = path.split("/")
+            if any(
+                part in {"", ".", ".."}
+                or Path(part).name != part
+                or (
+                    os.name == "nt"
+                    and (
+                        ":" in part
+                        or part != part.rstrip(" .")
+                        or PureWindowsPath(part).is_reserved()
+                    )
+                )
+                for part in parts
+            ):
+                raise ValueError(f"Unsupported Git path: {path!r}")
+            target_path = destination.joinpath(*parts)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            if mode == "120000":
+                symlinks.append((target_path, os.fsdecode(contents[blob])))
+            else:
+                with target_path.open("xb") as file:
+                    file.write(contents[blob])
+
+    # Write all regular files first, so none of those writes can follow a link.
+    for path, target in symlinks:
+        if Path(target).anchor or not Path(
+            os.path.abspath(path.parent / target)
+        ).is_relative_to(destination):
+            raise ValueError(
+                f"Symlink leaves committed tree: {path.relative_to(destination)}"
+            )
+        path.symlink_to(
+            target,
+            target_is_directory=os.name == "nt" and (path.parent / target).is_dir(),
+        )
+    for path, _ in symlinks:
+        if not path.resolve().is_relative_to(destination):
+            raise ValueError(
+                f"Symlink leaves committed tree: {path.relative_to(destination)}"
+            )
+
+
 # ── backfill ──────────────────────────────────────────────────────────────────
+
+
+def _extract_graph(
+    root: Path,
+    tree: dict[str, str],
+    blob_cache: OrderedDict[str, bytes],
+    parsed_cache: dict[str, tuple[str, ParsedSource]],
+) -> tuple[set[str], set[tuple[str, str]], set[str]]:
+    # Prefetch bytes in batches, including common configuration files.
+    hashes = {
+        blob
+        for path, blob in tree.items()
+        if not skipped(path)
+        and (
+            PurePosixPath(path).suffix.lower()
+            in SOURCE_EXTENSIONS | {".json", ".jsonc"}
+            or PurePosixPath(path).name in {"go.mod", "go.work", "Cargo.toml"}
+        )
+    }
+    # skipped() excludes dotfiles; .gitignore is nevertheless configuration.
+    if ".gitignore" in tree:
+        hashes.add(tree[".gitignore"])
+    contents = {blob: blob_cache[blob] for blob in hashes if blob in blob_cache}
+    contents.update(_git_cat_file_batch(root, sorted(hashes - contents.keys())))
+
+    def read_blob(path: str) -> bytes:
+        blob = tree[path]
+        if blob not in contents:
+            # Configuration extends may refer to any file advertised by the snapshot.
+            if blob in blob_cache:
+                contents[blob] = blob_cache[blob]
+            else:
+                contents.update(_git_cat_file_batch(root, [blob]))
+        return contents[blob]
+
+    snapshot = Snapshot(set(tree), read_blob)
+    # Retain syntax only for the current tree. Resolve it afresh so unchanged
+    # importers can acquire new targets or follow changed configuration.
+    parsed = {
+        path: (
+            parsed_cache[path]
+            if path in parsed_cache and parsed_cache[path][0] == tree[path]
+            else (tree[path], parse(path, snapshot.read(path)))
+        )
+        for path in sorted(snapshot.files)
+        if PurePosixPath(path).suffix in SOURCE_EXTENSIONS
+    }
+    parsed_cache.clear()
+    parsed_cache.update(parsed)
+    graph = ImportGraph(
+        snapshot,
+        parsed_sources={path: entry[1] for path, entry in parsed.items()},
+    )
+    nodes, edges = graph.graph()
+    # Include on-demand reads in the cross-commit cache as well.
+    for blob, content in contents.items():
+        blob_cache[blob] = content
+        blob_cache.move_to_end(blob)
+    while len(blob_cache) > 512:
+        blob_cache.popitem(last=False)
+    return nodes, edges, graph.diagnostics
+
+
+def graph_at_commit(
+    root: Path, commit_hash: str
+) -> tuple[set[str], set[tuple[str, str]]]:
+    """Extract one committed import graph without writing to the store or worktree."""
+    nodes, edges, diagnostics = _extract_graph(
+        root, git_ls_tree(root, commit_hash), OrderedDict(), {}
+    )
+    report_diagnostics(diagnostics)
+    return nodes, edges
 
 
 def backfill(
@@ -183,7 +328,6 @@ def backfill(
     for commit in commits:
         h = commit["hash"]
         curr_tree = git_ls_tree(root, h)
-        known_files = set(curr_tree.keys())
 
         # ── file temporal tracking ────────────────────────────────────────────
         for path in curr_tree:
@@ -191,60 +335,10 @@ def backfill(
                 file_first_seen[path] = h
             file_last_seen_alive[path] = h
 
-        # Prefetch bytes in batches, including common configuration files.
-        readable = [
-            path
-            for path in curr_tree
-            if not skipped(path)
-            and (
-                PurePosixPath(path).suffix.lower()
-                in SOURCE_EXTENSIONS | {".json", ".jsonc"}
-                or PurePosixPath(path).name in {"go.mod", "go.work", "Cargo.toml"}
-                or path == ".gitignore"
-            )
-        ]
-        # skipped() excludes dotfiles; .gitignore is nevertheless configuration.
-        if ".gitignore" in curr_tree and ".gitignore" not in readable:
-            readable.append(".gitignore")
-        hashes = {curr_tree[path] for path in readable}
-        contents = {blob: blob_cache[blob] for blob in hashes if blob in blob_cache}
-        contents.update(_git_cat_file_batch(root, sorted(hashes - contents.keys())))
-
-        def read_blob(path, tree=curr_tree, contents=contents):
-            blob = tree[path]
-            if blob not in contents:
-                # Prefetch extensions are only an optimization. Configuration
-                # extends may refer to any file advertised by the snapshot.
-                if blob in blob_cache:
-                    contents[blob] = blob_cache[blob]
-                else:
-                    contents.update(_git_cat_file_batch(root, [blob]))
-            return contents[blob]
-
-        snapshot = Snapshot(known_files, read_blob)
-        # Retain syntax only for the current tree. Resolve it afresh so unchanged
-        # importers can acquire new targets or follow changed configuration.
-        parsed_cache = {
-            path: (
-                parsed_cache[path]
-                if path in parsed_cache and parsed_cache[path][0] == curr_tree[path]
-                else (curr_tree[path], parse(path, snapshot.read(path)))
-            )
-            for path in sorted(snapshot.files)
-            if PurePosixPath(path).suffix in SOURCE_EXTENSIONS
-        }
-        graph = ImportGraph(
-            snapshot,
-            parsed_sources={path: entry[1] for path, entry in parsed_cache.items()},
+        nodes, edges, commit_diagnostics = _extract_graph(
+            root, curr_tree, blob_cache, parsed_cache
         )
-        nodes, edges = graph.graph()
-        # Include on-demand reads in the cross-commit cache as well.
-        for blob, content in contents.items():
-            blob_cache[blob] = content
-            blob_cache.move_to_end(blob)
-        while len(blob_cache) > 512:
-            blob_cache.popitem(last=False)
-        diagnostics.update(graph.diagnostics)
+        diagnostics.update(commit_diagnostics)
         store.record_graph_snapshot(h, nodes, edges)
         for source, target in edges:
             key = (source, target, "imports")

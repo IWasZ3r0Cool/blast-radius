@@ -374,9 +374,9 @@ uv run blastradius history . --max-commits 1000
 or reintroduced dependencies and branch histories do not depend on one lifetime
 interval. Clean normal indexes also record commit snapshots. Dirty working-tree
 indexes update the current graph without replacing the committed snapshot.
-The snapshot guard also checks the non-skipped directory inventory for ignored
-uncommitted files. This conservative check can prevent automatic snapshots for
-unrelated ignored files too; normal indexing and file selection are unchanged.
+On a clean checkout, analysis checks the working graph against a second graph
+from the committed files. Ignored inputs prevent a commit snapshot if they change
+the graph. The working index remains available for ordinary queries.
 
 For programmatic writes, `Store.sync()` updates only the current graph by default,
 even when given a commit. Pass `snapshot=True` explicitly only when its input
@@ -445,6 +445,47 @@ Changes since v1.2.0:
 | `--repo PATH` | `.` | Repo root (for git operations) |
 | `--db PATH` | auto-discovered | Path to `.blastradius/index.db` |
 | `--json` | off | Output raw JSON |
+
+---
+
+### `blastradius review`
+
+```bash
+blastradius review [--ref BASE] [--out FILE]
+```
+
+Generate a Markdown snapshot of the indexed graph for a human and an agent to
+review together. The report lists up to 20 files by blast score and groups files
+that participate in dependency cycles. Run `blastradius analyze .` to refresh the
+graph before generating a report.
+
+`--ref BASE` adds a committed comparison against `HEAD`. It requires the graph
+and SQLite index from a clean analysis at the Git repository root. Analysis
+verifies the graph against the committed tree. Ignored files can stay in the
+checkout when they leave the graph unchanged. If an ignored file changes the
+graph, remove or isolate it before reindexing for committed review. The report
+lists added and removed graph files, Git-modified paths, and changed dependency
+edges touching those paths. When comparable stored snapshots are unavailable,
+it extracts both commits with the history import extractor and names its
+language coverage in the report.
+
+For a before and after review, capture the first report at the base commit:
+
+```bash
+BASE=$(git rev-parse HEAD)
+blastradius analyze .
+blastradius review --out .blastradius/review-before.md
+```
+
+After committing the change, refresh the graph and capture the second report:
+
+```bash
+blastradius analyze .
+blastradius review --ref "$BASE" --out .blastradius/review-after.md
+```
+
+Share the Markdown files so the reviewer and the agent can cite the same paths,
+score changes, and dependencies. Omit `--out` to print the report to stdout.
 
 ---
 
