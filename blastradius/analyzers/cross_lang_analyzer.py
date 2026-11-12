@@ -136,7 +136,7 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
     for f in root.rglob("*.py"):
         if any(
             part in {".venv", "venv", "env", "__pycache__", "node_modules"}
-            for part in f.parts
+            for part in f.relative_to(root).parts
         ):
             continue
         try:
@@ -151,7 +151,7 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
     for f in root.rglob("*.py"):
         if any(
             part in {".venv", "venv", "env", "__pycache__", "node_modules"}
-            for part in f.parts
+            for part in f.relative_to(root).parts
         ):
             continue
         rel = f.relative_to(root).as_posix()
@@ -187,7 +187,10 @@ def find_api_boundaries(root: Path, all_nodes: list) -> list:
     for f in root.rglob("*"):
         if f.suffix not in JS_EXTS:
             continue
-        if any(part in {"node_modules", ".next", "dist", "build"} for part in f.parts):
+        if any(
+            part in {"node_modules", ".next", "dist", "build"}
+            for part in f.relative_to(root).parts
+        ):
             continue
         rel = f.relative_to(root).as_posix()
         if rel not in node_ids:

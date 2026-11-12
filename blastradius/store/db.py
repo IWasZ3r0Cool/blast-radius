@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = "4"
+FULL_INDEX_SNAPSHOT_VERSION = "5"
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,28 @@ class GraphSnapshot:
     edges: set[tuple[str, str]]
     coverage: str
     extraction_version: str
+
+    @classmethod
+    def from_index(cls, data: dict) -> GraphSnapshot:
+        """Project a full analyzer graph onto its internal nodes and edges."""
+        node_ids = {node["id"] for node in data["nodes"]}
+        external_ids = {
+            node["id"] for node in data["nodes"] if node.get("type") == "import"
+        }
+        edges = {(link["source"], link["target"]) for link in data["links"]}
+        # Validate before projecting so external edges cannot hide a missing endpoint.
+        _validate_snapshot_edges(node_ids, edges)
+        paths = node_ids - external_ids
+        return cls(
+            paths,
+            {
+                (source, target)
+                for source, target in edges
+                if source in paths and target in paths
+            },
+            "index",
+            FULL_INDEX_SNAPSHOT_VERSION,
+        )
 
 
 # sqlite-vec is an optional C extension; absence is a graceful degradation, not an error.
@@ -304,23 +327,9 @@ class Store:
         in the current graph. Missing edge endpoints raise ValueError before
         any synchronization writes when snapshot recording is enabled.
         """
-        snapshot_nodes: set[str] = set()
-        snapshot_edges: set[tuple[str, str]] = set()
-        if commit and snapshot:
-            node_ids = {node["id"] for node in data["nodes"]}
-            external_ids = {
-                node["id"] for node in data["nodes"] if node.get("type") == "import"
-            }
-            edges = {(link["source"], link["target"]) for link in data["links"]}
-            # Validate the complete input first, including external incident
-            # edges, so projection cannot hide a malformed internal endpoint.
-            _validate_snapshot_edges(node_ids, edges)
-            snapshot_nodes = node_ids - external_ids
-            snapshot_edges = {
-                (source, target)
-                for source, target in edges
-                if source not in external_ids and target not in external_ids
-            }
+        committed_graph = (
+            GraphSnapshot.from_index(data) if commit and snapshot else None
+        )
 
         now = _now()
         seen_file_ids: list[int] = []
@@ -476,12 +485,12 @@ class Store:
                 (commit, now),
             )
 
-        if commit and snapshot:
+        if commit and committed_graph is not None:
             self.record_graph_snapshot(
                 commit,
-                snapshot_nodes,
-                snapshot_edges,
-                coverage="index",
+                committed_graph.paths,
+                committed_graph.edges,
+                coverage=committed_graph.coverage,
             )
         self._conn.commit()
 
@@ -504,17 +513,20 @@ class Store:
 
         if coverage is None:
             coverage = HISTORY_COVERAGE
+        version = (
+            FULL_INDEX_SNAPSHOT_VERSION if coverage == "index" else EXTRACTION_VERSION
+        )
 
         _validate_snapshot_edges(nodes, edges)
         payload = json.dumps(
-            [sorted(nodes), sorted(edges), coverage, EXTRACTION_VERSION],
+            [sorted(nodes), sorted(edges), coverage, version],
             ensure_ascii=True,
             separators=(",", ":"),
         )
         snapshot_id = hashlib.sha256(payload.encode()).hexdigest()
         with self._conn:
-            # A normal index can contain other languages and cross-language links
-            # that language-limited backfill must not overwrite.
+            # Backfill only replaces full snapshots from version 1, which
+            # could include uncommitted files. Later full graphs retain their coverage.
             existing = self._conn.execute(
                 "SELECT g.coverage, g.extraction_version FROM commit_snapshots c "
                 "JOIN graph_snapshots g ON g.id=c.snapshot_id WHERE c.commit_hash=?",
@@ -524,7 +536,7 @@ class Store:
                 existing
                 and existing[0] == "index"
                 and coverage != "index"
-                and existing[1] == EXTRACTION_VERSION
+                and existing[1] != "1"
             ):
                 return
             exists = self._conn.execute(
@@ -533,7 +545,7 @@ class Store:
             if not exists:
                 self._conn.execute(
                     "INSERT INTO graph_snapshots VALUES (?,?,?)",
-                    (snapshot_id, coverage, EXTRACTION_VERSION),
+                    (snapshot_id, coverage, version),
                 )
                 self._conn.executemany(
                     "INSERT INTO snapshot_nodes VALUES (?,?)",
@@ -758,7 +770,10 @@ class Store:
         ]
 
     def snapshot_graph(self, commit_hash: str) -> GraphSnapshot | None:
-        """Read an exact commit graph with the metadata needed to compare it."""
+        """Read an exact commit graph and its metadata, or return None if absent.
+
+        SQLite errors propagate to the caller.
+        """
         row = self._conn.execute(
             "SELECT g.id, g.coverage, g.extraction_version FROM commit_snapshots c "
             "JOIN graph_snapshots g ON g.id=c.snapshot_id WHERE c.commit_hash=?",

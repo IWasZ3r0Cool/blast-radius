@@ -38,7 +38,7 @@ _CONFIG_DIRS = {"config", "cfg", "configuration", "settings", "conf"}
 def collect_files(root: Path, patterns: list):
     files = []
     for path in root.rglob("*.go"):
-        if is_skip_dir(path) or is_ignored(path, root, patterns):
+        if is_skip_dir(path.relative_to(root)) or is_ignored(path, root, patterns):
             continue
         files.append(path)
     return sorted(files)

@@ -38,7 +38,7 @@ def db_path_for(repo_root: Path) -> Path:
 def clean_index_stamp(commit: str, graph_text: str) -> str:
     """Tie the exported graph to the commit whose clean tree was indexed."""
     digest = hashlib.sha256(graph_text.encode("utf-8")).hexdigest()
-    return f"v2:{commit}:{digest}"
+    return f"v3:{commit}:{digest}"
 
 
 def _git_head(root: Path) -> str | None:
@@ -101,23 +101,26 @@ def _review_graph(
     )
 
 
+def analyze_commit(root: Path, commit: str) -> dict:
+    """Run the full analyzer on a commit without touching the worktree."""
+    prefix = subprocess.run(
+        ["git", "rev-parse", "--show-prefix"],
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=10,
+        check=True,
+    ).stdout.removesuffix(b"\n")
+    with TemporaryDirectory(prefix="blastradius-commit-") as tmp:
+        committed_tree = Path(tmp).resolve()
+        materialize_commit(root, commit, committed_tree)
+        return analyze(str(committed_tree / os.fsdecode(prefix)))
+
+
 def _matches_committed_graph(root: Path, commit: str, data: dict) -> bool:
-    # Git status excludes ignored files. Run the full analyzer on the committed
-    # inputs to check whether any local inputs changed the resulting graph.
+    # Git status omits ignored files. Compare the graph against the committed inputs.
     try:
-        prefix = subprocess.run(
-            ["git", "rev-parse", "--show-prefix"],
-            cwd=root,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=10,
-            check=True,
-        ).stdout.removesuffix(b"\n")
-        with TemporaryDirectory(prefix="blastradius-commit-") as tmp:
-            committed_tree = Path(tmp).resolve()
-            materialize_commit(root, commit, committed_tree)
-            reference = analyze(str(committed_tree / os.fsdecode(prefix)))
-        return _review_graph(data) == _review_graph(reference)
+        return _review_graph(data) == _review_graph(analyze_commit(root, commit))
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: could not verify committed graph: {exc}", file=sys.stderr)
         return False
@@ -146,9 +149,14 @@ def _git_changed(root: Path, from_commit: str, to_commit: str) -> set:
 
 
 def git_modified(
-    root: Path, from_ref: str, to_ref: str = "HEAD", *, strict: bool = False
+    root: Path,
+    from_ref: str,
+    to_ref: str = "HEAD",
+    *,
+    strict: bool = False,
+    include_type_changes: bool = False,
 ) -> list[str]:
-    """Return repo-relative paths with content changes between two refs (status M only)."""
+    """Return repo-relative modified paths, optionally including Git type changes."""
     try:
         r = subprocess.run(
             [
@@ -156,7 +164,7 @@ def git_modified(
                 "diff",
                 "--name-only",
                 "-z",
-                "--diff-filter=M",
+                "--diff-filter=MT" if include_type_changes else "--diff-filter=M",
                 from_ref,
                 to_ref,
                 "--",

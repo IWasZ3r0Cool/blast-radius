@@ -5,14 +5,17 @@ from __future__ import annotations
 """Build a Markdown snapshot of an indexed dependency graph."""
 
 import json
+import posixpath
 import re
 import subprocess
+from collections.abc import Iterable
 from contextlib import closing
 from pathlib import Path
 
-from blastradius.impact import is_file_node, rank_blast_files
+from blastradius.impact import rank_blast_files
 from blastradius.index import (
     CLEAN_INDEX_META_KEY,
+    analyze_commit,
     clean_index_stamp,
     db_path_for,
     find_index,
@@ -20,7 +23,9 @@ from blastradius.index import (
     git_resolve,
 )
 from blastradius.store import Store
+from blastradius.store.db import FULL_INDEX_SNAPSHOT_VERSION, GraphSnapshot
 from blastradius.temporal.changes import filter_changed_since
+from blastradius.temporal.history import git_tracked_paths
 
 
 def _code(value: str) -> str:
@@ -38,7 +43,7 @@ def _code(value: str) -> str:
 
 def _cycles(nodes: list[dict], links: list[dict]) -> list[list[str]]:
     """Find cyclic strongly connected components using two iterative DFS passes."""
-    outgoing = {node["id"]: set() for node in nodes if is_file_node(node)}
+    outgoing = {node["id"]: set() for node in nodes}
     incoming = {path: set() for path in outgoing}
     for link in links:
         source, target = link["source"], link["target"]
@@ -82,35 +87,44 @@ def _cycles(nodes: list[dict], links: list[dict]) -> list[list[str]]:
     return sorted(cycles)
 
 
-def _compare_commits(
-    store: Store, root: Path, base: str, head: str
-) -> tuple[str, dict]:
-    from blastradius.import_graph import EXTRACTION_VERSION, HISTORY_COVERAGE
-    from blastradius.temporal.history import git_tracked_paths, graph_at_commit
+def _go_package_dirs(paths: Iterable[str]) -> set[str]:
+    return {posixpath.dirname(path) or "." for path in paths if path.endswith(".go")}
 
+
+def _project_graph(
+    graph: GraphSnapshot, tracked: set[str]
+) -> tuple[set[str], set[tuple[str, str]]]:
+    paths = graph.paths & (tracked | _go_package_dirs(tracked))
+    edges = {
+        (source, target)
+        for source, target in graph.edges
+        if source in paths and target in paths
+    }
+    return paths, edges
+
+
+def _compare_commits(store: Store, root: Path, base: str, head: str) -> dict:
     before = store.snapshot_graph(base)
     after = store.snapshot_graph(head)
-    if (
-        before is not None
-        and after is not None
-        and before.coverage == after.coverage
-        and before.extraction_version == after.extraction_version == EXTRACTION_VERSION
+    if not (
+        before
+        and after
+        and before.coverage == after.coverage == "index"
+        and before.extraction_version
+        == after.extraction_version
+        == FULL_INDEX_SNAPSHOT_VERSION
     ):
-        # Full index snapshots may also contain virtual services, jobs, and tables.
-        base_paths = before.paths & git_tracked_paths(root, base)
-        head_paths = after.paths & git_tracked_paths(root, head)
-        base_edges = {
-            (s, t) for s, t in before.edges if s in base_paths and t in base_paths
-        }
-        head_edges = {
-            (s, t) for s, t in after.edges if s in head_paths and t in head_paths
-        }
-        coverage = before.coverage
-    else:
-        # Extract both sides the same way to avoid reporting extractor differences.
-        base_paths, base_edges = graph_at_commit(root, base)
-        head_paths, head_edges = graph_at_commit(root, head)
-        coverage = HISTORY_COVERAGE
+        before = GraphSnapshot.from_index(analyze_commit(root, base))
+        after = (
+            before
+            if base == head
+            else GraphSnapshot.from_index(analyze_commit(root, head))
+        )
+
+    base_tracked = git_tracked_paths(root, base)
+    head_tracked = git_tracked_paths(root, head)
+    base_paths, base_edges = _project_graph(before, base_tracked)
+    head_paths, head_edges = _project_graph(after, head_tracked)
 
     changes = {
         "added_files": sorted(head_paths - base_paths),
@@ -122,8 +136,12 @@ def _compare_commits(
             {"source": s, "target": t} for s, t in sorted(base_edges - head_edges)
         ],
     }
-    filter_changed_since(changes, sorted(git_modified(root, base, head, strict=True)))
-    return coverage, changes
+    modified = git_modified(root, base, head, strict=True, include_type_changes=True)
+    touched_packages = _go_package_dirs(modified) | _go_package_dirs(
+        base_tracked ^ head_tracked
+    )
+    filter_changed_since(changes, sorted(modified), touched_packages=touched_packages)
+    return changes
 
 
 def _change_sections(root: Path, graph_text: str, ref: str) -> list[str]:
@@ -159,19 +177,14 @@ def _change_sections(root: Path, graph_text: str, ref: str) -> list[str]:
                 "From the repository root, run blastradius analyze . on a clean checkout. "
                 "Remove or isolate any ignored files that affect the dependency graph."
             )
-        coverage, changes = _compare_commits(store, root, base, head)
+        changes = _compare_commits(store, root, base, head)
 
-    coverage_text = (
-        "stored index snapshots (tracked file nodes)"
-        if coverage == "index"
-        else f"historical import graphs ({', '.join(coverage.split(','))})"
-    )
     lines = [
         "## Committed changes",
         "",
         f"- Base: {_code(base)}",
         f"- HEAD: {_code(head)}",
-        f"- Graph coverage: {coverage_text}",
+        "- Graph coverage: full analyzer (tracked files and Go packages)",
     ]
     for key, title in (
         ("added_files", "Added files"),
@@ -210,7 +223,9 @@ def build_review(start: Path, *, ref: str | None = None) -> str:
         raise ValueError("Invalid blastradius.json graph. Run: blastradius analyze .")
 
     nodes = sorted(data["nodes"], key=lambda node: node["id"])
-    ranked = rank_blast_files(nodes, threshold=0)[:20]
+    ranked = rank_blast_files(
+        (node for node in nodes if node.get("language") != "go"), threshold=0
+    )[:20]
     lines = ["# Blast Radius review", "", "## Top blast scores", ""]
     lines.extend(
         f"{i}. {_code(node['id'])} — {node.get('blast_score', 0):.1f} "

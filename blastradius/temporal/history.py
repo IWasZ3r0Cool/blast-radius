@@ -12,6 +12,9 @@ import subprocess
 import sys
 from collections import OrderedDict
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from tempfile import TemporaryFile
+from threading import Event, Timer
+from typing import BinaryIO
 
 from blastradius.import_graph import ImportGraph, Snapshot, report_diagnostics
 from blastradius.import_graph.parsing import ParsedSource, parse
@@ -163,55 +166,154 @@ def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, bytes]:
     return results
 
 
-def materialize_commit(root: Path, commit_hash: str, destination: Path) -> None:
-    """Write tracked blobs into an empty temporary directory for full analysis."""
-    tree = list(_tree_blobs(root, commit_hash).items())
-    symlinks = []
-    batch_size = 128
-    for start in range(0, len(tree), batch_size):
-        batch = tree[start : start + batch_size]
-        contents = _git_cat_file_batch(root, sorted({blob for _, (_, blob) in batch}))
-        for path, (mode, blob) in batch:
-            parts = path.split("/")
-            if any(
-                part in {"", ".", ".."}
-                or Path(part).name != part
-                or (
-                    os.name == "nt"
-                    and (
-                        ":" in part
-                        or part != part.rstrip(" .")
-                        or PureWindowsPath(part).is_reserved()
-                    )
-                )
-                for part in parts
-            ):
-                raise ValueError(f"Unsupported Git path: {path!r}")
-            target_path = destination.joinpath(*parts)
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            if mode == "120000":
-                symlinks.append((target_path, os.fsdecode(contents[blob])))
-            else:
-                with target_path.open("xb") as file:
-                    file.write(contents[blob])
-
-    # Write all regular files first, so none of those writes can follow a link.
-    for path, target in symlinks:
-        if Path(target).anchor or not Path(
-            os.path.abspath(path.parent / target)
-        ).is_relative_to(destination):
-            raise ValueError(
-                f"Symlink leaves committed tree: {path.relative_to(destination)}"
-            )
-        path.symlink_to(
-            target,
-            target_is_directory=os.name == "nt" and (path.parent / target).is_dir(),
+def _invalid_path_part(part: str) -> bool:
+    return Path(part).name != part or (
+        os.name == "nt"
+        and (
+            ":" in part
+            or part != part.rstrip(" .")
+            or PureWindowsPath(part).is_reserved()
         )
-    for path, _ in symlinks:
-        if not path.resolve().is_relative_to(destination):
-            raise ValueError(
-                f"Symlink leaves committed tree: {path.relative_to(destination)}"
-            )
+    )
+
+
+def _read_tree_blobs(
+    stream: BinaryIO, tree: dict[str, tuple[str, str]], destination: Path
+) -> dict[Path, str]:
+    symlinks = {}
+    for path, (mode, blob) in tree.items():
+        parts = path.split("/")
+        if any(part in {"", ".", ".."} or _invalid_path_part(part) for part in parts):
+            raise ValueError(f"Unsupported Git path: {path!r}")
+
+        header = stream.readline(256)
+        fields = header.split()
+        if (
+            not header.endswith(b"\n")
+            or len(fields) != 3
+            or fields[:2] != [blob.encode("ascii"), b"blob"]
+            or not fields[2].isdigit()
+        ):
+            raise RuntimeError(f"Invalid git cat-file response for {path!r}")
+        size = int(fields[2])
+
+        target = destination.joinpath(*parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Placeholders let symlink validation use the temporary filesystem's own
+        # case and filename matching before any symlink can be followed.
+        with target.open("xb") as file:
+            if mode == "120000":
+                if size > 64 * 1024:
+                    raise ValueError(f"Git symlink target is too long: {path!r}")
+                data = stream.read(size)
+                if len(data) != size:
+                    raise RuntimeError(f"Incomplete Git blob for {path!r}")
+                symlinks[target] = os.fsdecode(data)
+            else:
+                remaining = size
+                while remaining:
+                    data = stream.read(min(remaining, 1024 * 1024))
+                    if not data:
+                        raise RuntimeError(f"Incomplete Git blob for {path!r}")
+                    file.write(data)
+                    remaining -= len(data)
+        if stream.read(1) != b"\n":
+            raise RuntimeError(f"Missing Git blob terminator for {path!r}")
+    return symlinks
+
+
+def _file_identity(path: Path) -> tuple[int, int]:
+    info = path.stat()
+    return info.st_dev, info.st_ino
+
+
+def _safe_link_destination(
+    root: Path, path: Path, targets: dict[tuple[int, int], str]
+) -> Path | None:
+    """Resolve a chain using the regular-file placeholders in the temporary tree."""
+    parts = list(path.parent.relative_to(root).parts)
+    remaining = [path.name]
+    expansions = 0
+    while remaining:
+        part = remaining.pop()
+        if part == "..":
+            if not parts:
+                return None
+            parts.pop()
+            continue
+        if _invalid_path_part(part):
+            return None
+        try:
+            target = targets.get(_file_identity(root.joinpath(*parts, part)))
+        except (FileNotFoundError, NotADirectoryError):
+            target = None
+        if target is None:
+            parts.append(part)
+            continue
+
+        expansions += 1
+        link = Path(target)
+        if expansions > 64 or not target or "\0" in target or link.anchor:
+            return None
+        remaining.extend(reversed(link.parts))
+    return root.joinpath(*parts)
+
+
+def materialize_commit(root: Path, commit_hash: str, destination: Path) -> None:
+    """Stream tracked blobs into an empty temporary directory for full analysis."""
+    tree = _tree_blobs(root, commit_hash)
+    if not tree:
+        return
+
+    command = ["git", "cat-file", "--batch"]
+    timeout = 60
+    timed_out = Event()
+    # Use files for requests and stderr so the child can stream stdout without
+    # blocking on either of the other channels.
+    with TemporaryFile() as requests, TemporaryFile() as errors:
+        for _, blob in tree.values():
+            requests.write(blob.encode("ascii") + b"\n")
+        requests.seek(0)
+        with subprocess.Popen(
+            command, cwd=root, stdin=requests, stdout=subprocess.PIPE, stderr=errors
+        ) as proc:
+            assert proc.stdout is not None
+
+            def expire() -> None:
+                timed_out.set()
+                proc.kill()
+
+            timer = Timer(timeout, expire)
+            timer.start()
+            try:
+                symlinks = _read_tree_blobs(proc.stdout, tree, destination)
+                if proc.stdout.read(1):
+                    raise RuntimeError("Unexpected trailing git cat-file output")
+                if proc.wait():
+                    errors.seek(0)
+                    detail = errors.read(4096).decode("utf-8", errors="replace").strip()
+                    raise RuntimeError(f"git cat-file failed: {detail}")
+            except RuntimeError as exc:
+                if timed_out.is_set():
+                    raise subprocess.TimeoutExpired(command, timeout) from exc
+                raise
+            finally:
+                timer.cancel()
+                timer.join()
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+
+    targets = {_file_identity(path): target for path, target in symlinks.items()}
+    safe_links = []
+    for path, target in symlinks.items():
+        resolved = _safe_link_destination(destination, path, targets)
+        if resolved is not None:
+            safe_links.append((path, target, os.name == "nt" and resolved.is_dir()))
+    for path in symlinks:
+        path.unlink()
+    for path, target, is_dir in safe_links:
+        path.symlink_to(target, target_is_directory=is_dir)
 
 
 # ── backfill ──────────────────────────────────────────────────────────────────
@@ -276,17 +378,6 @@ def _extract_graph(
     while len(blob_cache) > 512:
         blob_cache.popitem(last=False)
     return nodes, edges, graph.diagnostics
-
-
-def graph_at_commit(
-    root: Path, commit_hash: str
-) -> tuple[set[str], set[tuple[str, str]]]:
-    """Extract one committed import graph without writing to the store or worktree."""
-    nodes, edges, diagnostics = _extract_graph(
-        root, git_ls_tree(root, commit_hash), OrderedDict(), {}
-    )
-    report_diagnostics(diagnostics)
-    return nodes, edges
 
 
 def backfill(

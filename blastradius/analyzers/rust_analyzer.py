@@ -30,7 +30,7 @@ _CONFIG_NAMES = {"config", "settings", "configuration", "constants", "env"}
 def collect_files(root: Path, patterns: list):
     files = []
     for path in root.rglob("*.rs"):
-        if is_skip_dir(path) or is_ignored(path, root, patterns):
+        if is_skip_dir(path.relative_to(root)) or is_ignored(path, root, patterns):
             continue
         files.append(path)
     return sorted(files)
@@ -80,7 +80,7 @@ def analyze(root: Path, group_map: dict):
         nodes.append(
             {
                 "id": filename,
-                "type": node_type(path),
+                "type": node_type(path.relative_to(root)),
                 "language": "rust",
                 "size": result.loc,
                 "loc": result.loc,

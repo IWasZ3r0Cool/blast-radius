@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from contextlib import closing
@@ -12,9 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from blastradius import import_graph
+from blastradius import review
 from blastradius.index import CLEAN_INDEX_META_KEY, build, db_path_for
 from blastradius.store import Store
+from blastradius.store import db as store_db
+from blastradius.temporal.history import materialize_commit
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -40,6 +43,13 @@ def _cli(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
         capture_output=True,
         check=check,
     )
+
+
+def _symlink(path: Path, target: str) -> None:
+    try:
+        path.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"Source symlinks are unavailable: {exc}")
 
 
 @pytest.fixture
@@ -72,47 +82,100 @@ def test_review_matches_golden_from_nested_directory(repo: Path) -> None:
     assert destination.read_bytes() == expected
 
 
-@pytest.mark.parametrize("base_index", ["missing", "backfilled", "full", "old"])
-def test_review_ref_includes_removed_files_and_edges(
-    repo: Path, base_index: str, monkeypatch: pytest.MonkeyPatch
+def test_review_ref_is_identical_across_base_snapshot_states(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "old.py").write_text("VALUE = 1\n")
-    (repo / "main.py").write_text("import old\n")
+    (repo / "Old.java").write_text("package example;\nclass Old {}\n")
+    (repo / "Main.java").write_text(
+        "package example;\nimport example.Old;\nclass Main {}\n"
+    )
     (repo / "café.md").write_text("Before\n")
     base = _commit(repo, "base")
     _git(repo, "tag", "-a", "baseline", "-m", "baseline")
-    if base_index == "full":
-        build(str(repo))
-    elif base_index == "old":
-        with monkeypatch.context() as legacy:
-            legacy.setattr(import_graph, "EXTRACTION_VERSION", "3")
-            build(str(repo))
 
-    (repo / "old.py").unlink()
-    (repo / "new.py").write_text("VALUE = 2\n")
-    (repo / "main.py").write_text("import new\n")
+    (repo / "Old.java").unlink()
+    (repo / "New.java").write_text("package example;\nclass New {}\n")
+    (repo / "Main.java").write_text(
+        "package example;\nimport example.New;\nclass Main {}\n"
+    )
     (repo / "café.md").write_text("After\n")
     head = _commit(repo, "swap dependency")
     build(str(repo))
-    if base_index == "backfilled":
-        _cli(repo, "history")
+    result = _cli(repo, "review", "--ref", "baseline").stdout
+    report = result.decode("utf-8")
+    assert f"- Base: `{base}`\n- HEAD: `{head}`\n" in report
+    assert "### Added files (1)\n\n- `New.java`" in report
+    assert "### Removed files (1)\n\n- `Old.java`" in report
+    assert "### Modified files (2)\n\n- `Main.java`\n- `café.md`" in report
+    assert "### Added edges (1)\n\n- `Main.java` → `New.java`" in report
+    assert "### Removed edges (1)\n\n- `Main.java` → `Old.java`" in report
+
+    _cli(repo, "history")
+    assert _cli(repo, "review", "--ref", base).stdout == result
+
+    with monkeypatch.context() as legacy, closing(Store(db_path_for(repo))) as store:
+        legacy.setattr(store_db, "FULL_INDEX_SNAPSHOT_VERSION", "3")
+        store.record_graph_snapshot(base, {"Main.java"}, set(), coverage="index")
+    assert _cli(repo, "review", "--ref", base).stdout == result
+
+    _git(repo, "checkout", "--detach", base)
+    build(str(repo))
+    _git(repo, "checkout", "--detach", head)
+    build(str(repo))
 
     # These edits happened after the indexed commit and must not enter the report.
-    (repo / "main.py").write_text("VALUE = 3\n")
-    (repo / "uncommitted.py").write_text("VALUE = 4\n")
-    result = _cli(repo, "review", "--ref", "baseline")
-    assert _cli(repo, "review", "--ref", base).stdout == result.stdout
-    report = result.stdout.decode("utf-8")
-    assert f"- Base: `{base}`\n- HEAD: `{head}`\n" in report
-    assert "### Added files (1)\n\n- `new.py`" in report
-    assert "### Removed files (1)\n\n- `old.py`" in report
-    assert "### Modified files (2)\n\n- `café.md`\n- `main.py`" in report
-    assert "### Added edges (1)\n\n- `main.py` → `new.py`" in report
-    assert "### Removed edges (1)\n\n- `main.py` → `old.py`" in report
-    assert "uncommitted.py" not in report
-    assert ("stored index snapshots" in report) == (base_index == "full")
-    assert ("historical import graphs" in report) == (base_index != "full")
+    (repo / "Main.java").write_text("class Main {}\n")
+    (repo / "Uncommitted.java").write_text("class Uncommitted {}\n")
+
+    def unexpected_analysis(*args):
+        pytest.fail("Current full snapshots should be reused")
+
+    monkeypatch.setattr(review, "analyze_commit", unexpected_analysis)
+    assert review.build_review(repo, ref=base) == report
     assert _git(repo, "rev-parse", "HEAD") == head
+
+
+def test_review_go_file_changes_touch_the_root_package(repo: Path) -> None:
+    (repo / "go.mod").write_text("module example.com/app\n")
+    (repo / "main.go").write_text("package main\n")
+    (repo / "lib").mkdir()
+    (repo / "lib" / "lib.go").write_text("package lib\n")
+    base = _commit(repo, "base")
+    build(str(repo))
+
+    (repo / "main.go").write_text('package main\nimport "example.com/app/lib"\n')
+    _commit(repo, "import library from root package")
+    build(str(repo))
+
+    report = _cli(repo, "review", "--ref", base).stdout.decode("utf-8")
+    assert "## Top blast scores\n\nNo indexed files." in report
+    assert "### Modified files (1)\n\n- `main.go`" in report
+    assert "### Added edges (1)\n\n- `.` → `lib`" in report
+
+
+@pytest.mark.parametrize("location", ["service", ".hidden", "build"])
+def test_clean_index_is_independent_of_checkout_location(
+    repo: Path, location: str
+) -> None:
+    (repo / "Main.java").write_text(
+        "package example;\nimport example.Lib;\nclass Main {}\n"
+    )
+    (repo / "Lib.java").write_text("package example;\nclass Lib {}\n")
+    (repo / "vendor").mkdir()
+    (repo / "vendor" / "Ignored.java").write_text("class Ignored {}\n")
+    head = _commit(repo, "base")
+
+    checkout = repo.parent / f"{repo.name}-checkout" / location
+    shutil.copytree(repo, checkout)
+    expected = build(str(repo))
+    data = build(str(checkout))
+    assert data["nodes"] == expected["nodes"]
+    assert data["links"] == expected["links"]
+    assert {node["id"] for node in data["nodes"]} == {"Main.java", "Lib.java"}
+    assert (
+        _cli(checkout, "review", "--ref", head).stdout
+        == _cli(repo, "review", "--ref", head).stdout
+    )
 
 
 def test_review_ref_accepts_harmless_ignored_artifacts(repo: Path) -> None:
@@ -130,7 +193,7 @@ def test_review_ref_accepts_harmless_ignored_artifacts(repo: Path) -> None:
     build(str(repo))
 
     report = _cli(repo, "review", "--ref", head).stdout.decode("utf-8")
-    assert "stored index snapshots" in report
+    assert "Graph coverage: full analyzer" in report
     assert "`main.py`" in report
 
 
@@ -162,7 +225,9 @@ def test_ignored_router_override_cannot_certify_a_working_graph(repo: Path) -> N
 
     generated.unlink()
     build(str(repo))
-    assert b"stored index snapshots" in _cli(repo, "review", "--ref", head).stdout
+    assert (
+        b"Graph coverage: full analyzer" in _cli(repo, "review", "--ref", head).stdout
+    )
     with closing(Store(db_path_for(repo))) as store:
         verified = store.snapshot_graph(head)
         assert verified is not None and edge in verified.edges
@@ -180,18 +245,80 @@ def test_review_ref_keeps_tracked_symlinks_in_stored_deltas(repo: Path) -> None:
     base = _commit(repo, "base")
     build(str(repo))
 
-    try:
-        (repo / "alias.py").symlink_to("target.py")
-    except OSError as exc:
-        pytest.skip(f"Source symlinks are unavailable: {exc}")
+    _symlink(repo / "alias-target", "target.py")
+    _symlink(repo / "alias.py", "alias-target")
     (repo / "main.py").write_text("from alias import VALUE\n")
     _commit(repo, "import through tracked symlink")
     build(str(repo))
 
     report = _cli(repo, "review", "--ref", base).stdout.decode("utf-8")
-    assert "stored index snapshots" in report
+    assert "Graph coverage: full analyzer" in report
     assert "### Added files (1)\n\n- `alias.py`" in report
     assert "### Added edges (1)\n\n- `main.py` → `alias.py`" in report
+
+
+def test_review_ref_keeps_edges_for_a_git_type_change(repo: Path) -> None:
+    (repo / "app.py").write_text("import before\n")
+    (repo / "before.py").write_text("VALUE = 1\n")
+    (repo / "after.py").write_text("VALUE = 2\n")
+    (repo / "target.py").write_text("import after\n")
+    base = _commit(repo, "base")
+    build(str(repo))
+
+    (repo / "app.py").unlink()
+    _symlink(repo / "app.py", "target.py")
+    _commit(repo, "replace app with a symlink")
+    build(str(repo))
+
+    report = _cli(repo, "review", "--ref", base).stdout.decode("utf-8")
+    assert "### Modified files (1)\n\n- `app.py`" in report
+    assert "### Added edges (1)\n\n- `app.py` → `after.py`" in report
+    assert "### Removed edges (1)\n\n- `app.py` → `before.py`" in report
+    changes = json.loads(_cli(repo, "changed-since", base, "--json").stdout)
+    assert "app.py" not in changes["modified_files"]
+
+
+def test_materialization_omits_escaping_and_cyclic_symlinks(repo: Path) -> None:
+    (repo / "main.py").write_text("VALUE = 1\n")
+    (repo / "readme.txt").write_text("Tracked documentation\n")
+    outside = repo.parent / f"{repo.name}-external.txt"
+    outside.write_text("External documentation\n")
+    _symlink(repo / "absolute-link", str(outside))
+    _symlink(repo / "escape-link", f"../{outside.name}")
+    _symlink(repo / "escape-chain", "escape-link")
+    _symlink(repo / "loop-a", "loop-b")
+    _symlink(repo / "loop-b", "loop-a")
+    _symlink(repo / "readme-link", "readme.txt")
+    _symlink(repo / "readme-chain", "readme-link")
+    head = _commit(repo, "base")
+
+    destination = repo.parent / f"{repo.name}-materialized"
+    destination.mkdir()
+    materialize_commit(repo, head, destination)
+    assert {path.name for path in destination.iterdir()} == {
+        ".gitignore",
+        "main.py",
+        "readme.txt",
+        "readme-link",
+        "readme-chain",
+    }
+    assert (destination / "readme-chain").read_text() == "Tracked documentation\n"
+    build(str(repo))
+    assert _cli(repo, "review", "--ref", head).stdout
+
+
+def test_graph_changing_external_symlink_prevents_certification(repo: Path) -> None:
+    (repo / "main.py").write_text("VALUE = 1\n")
+    outside = repo.parent / f"{repo.name}-external.css"
+    outside.write_text("body { color: red; }\n")
+    _symlink(repo / "external.css", str(outside))
+    head = _commit(repo, "base")
+
+    data = build(str(repo))
+    assert "external.css" in {node["id"] for node in data["nodes"]}
+    with closing(Store(db_path_for(repo))) as store:
+        assert store.snapshot_graph(head) is None
+    assert _cli(repo, "review", "--ref", head, check=False).returncode == 1
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows filenames cannot contain CR")
@@ -205,7 +332,7 @@ def test_review_ref_preserves_carriage_returns_in_tracked_paths(repo: Path) -> N
     build(str(repo))
 
     report = _cli(repo, "review", "--ref", base).stdout.decode("utf-8")
-    assert "stored index snapshots" in report
+    assert "Graph coverage: full analyzer" in report
     assert "### Removed files (1)\n\n- `old\\rname.py`" in report
 
 
@@ -214,7 +341,7 @@ def test_review_ref_requires_a_new_stamp_after_upgrade(repo: Path) -> None:
     head = _commit(repo, "base")
     build(str(repo))
     graph = (repo / "blastradius.json").read_text(encoding="utf-8")
-    old_stamp = f"{head}:{hashlib.sha256(graph.encode('utf-8')).hexdigest()}"
+    old_stamp = f"v2:{head}:{hashlib.sha256(graph.encode('utf-8')).hexdigest()}"
     with closing(Store(db_path_for(repo))) as store:
         store.set_meta(CLEAN_INDEX_META_KEY, old_stamp)
         store._conn.commit()
@@ -299,3 +426,19 @@ def test_review_limits_ranking_and_handles_deep_cycle(tmp_path: Path) -> None:
     assert "0020.py" not in top
     assert "- `0000.py`, `0001.py`" in cycles
     assert "`1199.py`\n- `self.py`" in cycles
+
+
+def test_review_reports_an_indexed_prisma_cycle(repo: Path) -> None:
+    (repo / "schema.prisma").write_text(
+        "model Alpha {\n  next Beta\n}\n"
+        "model Beta {\n  next Gamma\n}\n"
+        "model Gamma {\n  next Alpha\n}\n"
+    )
+    build(str(repo))
+
+    report = _cli(repo, "review").stdout.decode("utf-8")
+    assert "## Top blast scores\n\nNo indexed files." in report
+    assert "## Dependency cycle groups (1)" in report
+    assert (
+        "- `schema.prisma:Alpha`, `schema.prisma:Beta`, `schema.prisma:Gamma`" in report
+    )

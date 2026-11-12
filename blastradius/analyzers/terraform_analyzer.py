@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Terraform / HCL analyzer.
 
 Produces file-level nodes from .tf files.
@@ -8,8 +12,6 @@ Node types:
 Links:
   local module sources, cross-resource references, provider imports.
 """
-
-from __future__ import annotations
 
 import re
 from pathlib import Path
@@ -75,7 +77,7 @@ _VENDOR_PREFIX_RE = re.compile(r"^(?:gcp|aws|azure|google|terraform)-")
 def collect_files(root: Path, patterns: list) -> list[Path]:
     files = []
     for p in root.rglob("*.tf"):
-        if is_skip_dir(p) or is_ignored(p, root, patterns):
+        if is_skip_dir(p.relative_to(root)) or is_ignored(p, root, patterns):
             continue
         files.append(p)
     return sorted(files)
@@ -321,7 +323,9 @@ def analyze(root: Path, group_map: dict):
             total_loc += loc
             source = data["source"]
 
-            ntype = node_type(f, bool(data["resources"]), bool(data["data_sources"]))
+            ntype = node_type(
+                f.relative_to(root), bool(data["resources"]), bool(data["data_sources"])
+            )
             seen_links: set[tuple[str, str]] = set()
 
             # Module source → cross-directory edges (the only legitimate cross-dir link)

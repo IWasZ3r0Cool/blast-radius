@@ -133,13 +133,14 @@ def test_root_markers_trigger_detection_without_source(
     assert detect_languages(tmp_path) == [language]
 
 
-def test_exclusion_checks_include_repository_ancestors(tmp_path: Path) -> None:
+def test_exclusion_checks_use_repository_relative_paths(tmp_path: Path) -> None:
     root = tmp_path / "build" / "repo"
     _touch(root, "src/module.py")
-    assert detect_languages(root) == []
+    _touch(root, "build/ignored.js")
+    assert detect_languages(root) == ["python"]
     # Manifest checks remain independent of the source-path exclusions.
     _touch(root, "package.json")
-    assert detect_languages(root) == ["javascript"]
+    assert detect_languages(root) == ["python", "javascript"]
 
 
 def test_glob_matching_still_accepts_directory_names(tmp_path: Path) -> None:

@@ -128,6 +128,8 @@ def _cmd_impact(args: argparse.Namespace) -> None:
 
     if as_of:
         # ── temporal path: query DB for historical blast radius ────────────────
+        import sqlite3
+
         from blastradius.store import Store
 
         repo = Path(args.file).resolve().parent
@@ -142,43 +144,49 @@ def _cmd_impact(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-        with closing(Store(db_path)) as store:
-            # Resolve repo root from DB meta
-            repo_root_str = store.get_meta("repo_root")
-            repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
+        try:
+            with closing(Store(db_path)) as store:
+                # Resolve repo root from DB meta
+                repo_root_str = store.get_meta("repo_root")
+                repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
 
-            full_hash = git_resolve(repo_root, as_of)
-            if not full_hash:
-                print(f"Could not resolve ref: {as_of}", file=sys.stderr)
-                sys.exit(1)
+                full_hash = git_resolve(repo_root, as_of)
+                if not full_hash:
+                    print(f"Could not resolve ref: {as_of}", file=sys.stderr)
+                    sys.exit(1)
 
-            reachable = git_reachable(repo_root, full_hash)
-            if not reachable:
-                print(f"No commits reachable from {as_of}", file=sys.stderr)
-                sys.exit(1)
+                reachable = git_reachable(repo_root, full_hash)
+                if not reachable:
+                    print(f"No commits reachable from {as_of}", file=sys.stderr)
+                    sys.exit(1)
 
-            # Resolve file_id (may be relative or absolute)
-            fp = args.file
-            snapshot_paths = store.snapshot_paths(full_hash)
-            all_paths = (
-                snapshot_paths
-                if snapshot_paths is not None
-                else [
-                    r[0]
-                    for r in store._conn.execute("SELECT path FROM files").fetchall()
-                ]
-            )
-            try:
-                file_id = _resolve_cli_file_id(fp, all_paths)
-            except ValueError as exc:
-                print(str(exc), file=sys.stderr)
-                sys.exit(1)
+                # Resolve file_id (may be relative or absolute)
+                fp = args.file
+                snapshot_paths = store.snapshot_paths(full_hash)
+                all_paths = (
+                    snapshot_paths
+                    if snapshot_paths is not None
+                    else [
+                        r[0]
+                        for r in store._conn.execute(
+                            "SELECT path FROM files"
+                        ).fetchall()
+                    ]
+                )
+                try:
+                    file_id = _resolve_cli_file_id(fp, all_paths)
+                except ValueError as exc:
+                    print(str(exc), file=sys.stderr)
+                    sys.exit(1)
 
-            if not file_id:
-                print(f"File not found in index: {fp}", file=sys.stderr)
-                sys.exit(1)
+                if not file_id:
+                    print(f"File not found in index: {fp}", file=sys.stderr)
+                    sys.exit(1)
 
-            blast = store.as_of_impact(file_id, reachable, commit_hash=full_hash)
+                blast = store.as_of_impact(file_id, reachable, commit_hash=full_hash)
+        except sqlite3.Error as exc:
+            print(f"Impact: could not read temporal index: {exc}", file=sys.stderr)
+            sys.exit(1)
 
         if blast is None:
             print(
