@@ -362,8 +362,8 @@ not expanded. Absolute manifest paths and paths outside the repository are
 unsupported for both languages; neither resolver runs builds or downloads packages.
 
 After upgrading from Python/JS-only historical extraction, reindex HEAD and rerun
-history for the range you need. Existing snapshot tables are reused, and snapshots
-from the older extraction version are refreshed automatically during backfill:
+history for the range you need. Existing snapshot tables are reused, and history
+snapshots from older extraction versions are refreshed automatically during backfill:
 
 ```bash
 uv run blastradius analyze .
@@ -374,9 +374,9 @@ uv run blastradius history . --max-commits 1000
 or reintroduced dependencies and branch histories do not depend on one lifetime
 interval. Clean normal indexes also record commit snapshots. Dirty working-tree
 indexes update the current graph without replacing the committed snapshot.
-The snapshot guard also checks the non-skipped directory inventory for ignored
-uncommitted files. This conservative check can prevent automatic snapshots for
-unrelated ignored files too; normal indexing and file selection are unchanged.
+On a clean checkout, analysis checks the working graph against a second graph
+from the committed files. Ignored inputs prevent a commit snapshot if they change
+the graph. The working index remains available for ordinary queries.
 
 For programmatic writes, `Store.sync()` updates only the current graph by default,
 even when given a commit. Pass `snapshot=True` explicitly only when its input
@@ -392,8 +392,8 @@ references outside the processed range require another backfill with appropriate
 bounds. Existing first/last metadata remains available for `changed-since` and
 symbol search; their temporal semantics are unchanged by snapshot storage.
 Rerun history after upgrading from extraction version 1 to repair older index
-snapshots using the documented backfill coverage above. Current-version full
-index snapshots retain their existing protection. No database migration is needed.
+snapshots using the documented backfill coverage above. Backfill preserves full
+index snapshots from later versions. No database migration is needed.
 
 A local Python 3.10 comparison on 202 source files and eight commits measured
 normal indexing at 0.16s (previously 0.25s) and backfill at 0.35s (previously
@@ -445,6 +445,48 @@ Changes since v1.2.0:
 | `--repo PATH` | `.` | Repo root (for git operations) |
 | `--db PATH` | auto-discovered | Path to `.blastradius/index.db` |
 | `--json` | off | Output raw JSON |
+
+---
+
+### `blastradius review`
+
+```bash
+blastradius review [--ref BASE] [--out FILE]
+```
+
+Generate a Markdown snapshot of the indexed graph for a human and an agent to
+review together. The report lists up to 20 files by blast score and groups nodes
+that participate in dependency cycles, including schema and infrastructure nodes.
+Run `blastradius analyze .` to refresh the graph before generating a report.
+
+`--ref BASE` adds a committed comparison against `HEAD`. It requires the graph
+and SQLite index from a clean analysis at the Git repository root. Analysis
+verifies the graph against the committed tree. Ignored files can stay in the
+checkout when they leave the graph unchanged. If an ignored file changes the
+graph, remove or isolate it before reindexing for committed review. After upgrading,
+run `blastradius analyze .` once on a clean checkout to refresh the verification stamp.
+The report lists added and removed graph files and Go packages, Git-modified
+paths (including file type changes), and changed edges touching those paths or
+their Go packages. When current full-index snapshots are unavailable, review
+runs the full analyzer on both committed trees.
+
+For a before and after review, capture the first report at the base commit:
+
+```bash
+BASE=$(git rev-parse HEAD)
+blastradius analyze .
+blastradius review --out .blastradius/review-before.md
+```
+
+After committing the change, refresh the graph and capture the second report:
+
+```bash
+blastradius analyze .
+blastradius review --ref "$BASE" --out .blastradius/review-after.md
+```
+
+Share the Markdown files so the reviewer and the agent can cite the same paths,
+score changes, and dependencies. Omit `--out` to print the report to stdout.
 
 ---
 

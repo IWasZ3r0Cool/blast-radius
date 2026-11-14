@@ -42,10 +42,10 @@ _DETECTION_SKIP_DIRS = {
 
 
 def _any_match(root: Path, globs: list[str]) -> bool:
-    """Find the first glob match with no excluded name in its full path."""
+    """Find a glob match with no excluded name relative to the repository root."""
     for glob in globs:
         for path in root.rglob(glob):
-            if _DETECTION_SKIP_DIRS.isdisjoint(path.parts):
+            if _DETECTION_SKIP_DIRS.isdisjoint(path.relative_to(root).parts):
                 return True
     return False
 

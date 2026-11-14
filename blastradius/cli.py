@@ -128,6 +128,8 @@ def _cmd_impact(args: argparse.Namespace) -> None:
 
     if as_of:
         # ── temporal path: query DB for historical blast radius ────────────────
+        import sqlite3
+
         from blastradius.store import Store
 
         repo = Path(args.file).resolve().parent
@@ -142,43 +144,49 @@ def _cmd_impact(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-        with closing(Store(db_path)) as store:
-            # Resolve repo root from DB meta
-            repo_root_str = store.get_meta("repo_root")
-            repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
+        try:
+            with closing(Store(db_path)) as store:
+                # Resolve repo root from DB meta
+                repo_root_str = store.get_meta("repo_root")
+                repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
 
-            full_hash = git_resolve(repo_root, as_of)
-            if not full_hash:
-                print(f"Could not resolve ref: {as_of}", file=sys.stderr)
-                sys.exit(1)
+                full_hash = git_resolve(repo_root, as_of)
+                if not full_hash:
+                    print(f"Could not resolve ref: {as_of}", file=sys.stderr)
+                    sys.exit(1)
 
-            reachable = git_reachable(repo_root, full_hash)
-            if not reachable:
-                print(f"No commits reachable from {as_of}", file=sys.stderr)
-                sys.exit(1)
+                reachable = git_reachable(repo_root, full_hash)
+                if not reachable:
+                    print(f"No commits reachable from {as_of}", file=sys.stderr)
+                    sys.exit(1)
 
-            # Resolve file_id (may be relative or absolute)
-            fp = args.file
-            snapshot_paths = store.snapshot_paths(full_hash)
-            all_paths = (
-                snapshot_paths
-                if snapshot_paths is not None
-                else [
-                    r[0]
-                    for r in store._conn.execute("SELECT path FROM files").fetchall()
-                ]
-            )
-            try:
-                file_id = _resolve_cli_file_id(fp, all_paths)
-            except ValueError as exc:
-                print(str(exc), file=sys.stderr)
-                sys.exit(1)
+                # Resolve file_id (may be relative or absolute)
+                fp = args.file
+                snapshot_paths = store.snapshot_paths(full_hash)
+                all_paths = (
+                    snapshot_paths
+                    if snapshot_paths is not None
+                    else [
+                        r[0]
+                        for r in store._conn.execute(
+                            "SELECT path FROM files"
+                        ).fetchall()
+                    ]
+                )
+                try:
+                    file_id = _resolve_cli_file_id(fp, all_paths)
+                except ValueError as exc:
+                    print(str(exc), file=sys.stderr)
+                    sys.exit(1)
 
-            if not file_id:
-                print(f"File not found in index: {fp}", file=sys.stderr)
-                sys.exit(1)
+                if not file_id:
+                    print(f"File not found in index: {fp}", file=sys.stderr)
+                    sys.exit(1)
 
-            blast = store.as_of_impact(file_id, reachable, commit_hash=full_hash)
+                blast = store.as_of_impact(file_id, reachable, commit_hash=full_hash)
+        except sqlite3.Error as exc:
+            print(f"Impact: could not read temporal index: {exc}", file=sys.stderr)
+            sys.exit(1)
 
         if blast is None:
             print(
@@ -447,6 +455,7 @@ def _cmd_dependencies(args: argparse.Namespace) -> None:
 
 
 def _cmd_high_blast(args: argparse.Namespace) -> None:
+    from blastradius.impact import rank_blast_files
     from blastradius.index import INDEX_FILENAME, find_index, load
 
     if args.index:
@@ -461,17 +470,7 @@ def _cmd_high_blast(args: argparse.Namespace) -> None:
             sys.exit(1)
     data = load(index_path)
     threshold = args.threshold
-    _NON_FILE_TYPES = {"import", "service", "pipeline", "database"}
-    results = sorted(
-        [
-            n
-            for n in data["nodes"]
-            if n.get("blast_score", 0) >= threshold
-            and n.get("type") not in _NON_FILE_TYPES
-        ],
-        key=lambda n: n["blast_score"],
-        reverse=True,
-    )
+    results = rank_blast_files(data["nodes"], threshold)
     if args.json:
         print(
             json.dumps(
@@ -641,6 +640,7 @@ def _cmd_history(args: argparse.Namespace) -> None:
 def _cmd_changed_since(args: argparse.Namespace) -> None:
     from blastradius.index import find_db, git_modified, git_reachable, git_resolve
     from blastradius.store import Store
+    from blastradius.temporal.changes import filter_changed_since
 
     db_path = Path(args.db) if getattr(args, "db", None) else find_db(Path.cwd())
     if not db_path or not db_path.exists():
@@ -668,35 +668,14 @@ def _cmd_changed_since(args: argparse.Namespace) -> None:
     last_indexed = store.get_meta("last_indexed_commit") or ""
     store.close()
 
-    # Augment with content-modified files from git (files that changed but weren't added/removed)
-    modified = git_modified(repo, full_hash)
-    added_set = set(result.get("added_files", []))
-    removed_set = set(result.get("removed_files", []))
-    result["modified_files"] = [
-        f for f in modified if f not in added_set and f not in removed_set
-    ]
-
-    # Filter edges to only those touching the changed file set — the full graph diff is noise.
-    touched = added_set | removed_set | set(result["modified_files"])
-    all_ae = result["added_edges"]
-    all_re = result["removed_edges"]
-    ae_filtered = [
-        e for e in all_ae if e["source"] in touched or e["target"] in touched
-    ]
-    re_filtered = [
-        e for e in all_re if e["source"] in touched or e["target"] in touched
-    ]
-    result["added_edges"] = ae_filtered
-    result["removed_edges"] = re_filtered
-    suppressed = (len(all_ae) - len(ae_filtered)) + (len(all_re) - len(re_filtered))
-    if suppressed:
-        result["suppressed_edge_count"] = suppressed
+    filter_changed_since(result, git_modified(repo, full_hash))
+    suppressed = result.get("suppressed_edge_count", 0)
 
     # Count added edges whose first_seen_commit matches last analyze HEAD —
     # these may be initial-indexing artifacts rather than genuine new coupling.
     analyze_origin_count = sum(
         1
-        for e in ae_filtered
+        for e in result["added_edges"]
         if last_indexed and e.get("first_seen_commit") == last_indexed
     )
 
@@ -751,6 +730,31 @@ def _cmd_changed_since(args: argparse.Namespace) -> None:
                 )
         if not any([mf, af, rf, ae, re_]):
             print("  (no changes detected)")
+
+
+def _cmd_review(args: argparse.Namespace) -> None:
+    import sqlite3
+    import subprocess
+
+    from blastradius.review import build_review
+
+    try:
+        markdown = build_review(Path.cwd(), ref=args.ref)
+        if args.out is None:
+            if hasattr(sys.stdout, "reconfigure"):
+                sys.stdout.reconfigure(newline="\n")
+            sys.stdout.write(markdown)
+        else:
+            Path(args.out).write_text(markdown, encoding="utf-8", newline="\n")
+    except (
+        OSError,
+        ValueError,
+        sqlite3.Error,
+        subprocess.SubprocessError,
+        RuntimeError,
+    ) as exc:
+        print(f"Review: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_search(args: argparse.Namespace) -> None:
@@ -1031,6 +1035,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_cs.add_argument("--db", help="Path to index.db (auto-discovered if omitted)")
     p_cs.add_argument("--json", action="store_true", help="Output raw JSON")
 
+    p_review = sub.add_parser(
+        "review", help="Generate a Markdown snapshot of the dependency graph"
+    )
+    p_review.add_argument(
+        "--ref", metavar="BASE", help="Compare committed HEAD against BASE"
+    )
+    p_review.add_argument(
+        "--out", metavar="FILE", help="Write Markdown to FILE (default: stdout)"
+    )
+
     # ── search ─────────────────────────────────────────────────────────────────
     p_search = sub.add_parser(
         "search",
@@ -1092,6 +1106,7 @@ def main() -> None:
         "db": _cmd_db,
         "history": _cmd_history,
         "changed-since": _cmd_changed_since,
+        "review": _cmd_review,
         "search": _cmd_search,
     }
     dispatch[args.command](args)

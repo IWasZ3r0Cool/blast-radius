@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Ruby repository analyzer."""
 
 import re
@@ -32,7 +36,7 @@ _CONFIG_STEMS = {
 def collect_files(root: Path, patterns: list):
     files = []
     for p in root.rglob("*.rb"):
-        if is_skip_dir(p) or is_ignored(p, root, patterns):
+        if is_skip_dir(p.relative_to(root)) or is_ignored(p, root, patterns):
             continue
         files.append(p)
     return sorted(files)
@@ -136,7 +140,7 @@ def analyze(root: Path, group_map: dict):
         nodes.append(
             {
                 "id": rel,
-                "type": node_type(f),
+                "type": node_type(f.relative_to(root)),
                 "language": "ruby",
                 "framework": framework,
                 "size": loc,

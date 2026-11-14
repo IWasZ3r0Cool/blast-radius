@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """CSS / SCSS / Less stylesheet analyzer."""
 
 import re
@@ -20,7 +24,7 @@ def collect_files(root: Path, patterns: list):
     seen = set()
     for ext in CSS_EXTENSIONS:
         for p in root.rglob(f"*{ext}"):
-            if is_skip_dir(p) or is_ignored(p, root, patterns):
+            if is_skip_dir(p.relative_to(root)) or is_ignored(p, root, patterns):
                 continue
             seen.add(p)
     return sorted(seen)

@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Database schema analyzer.
 
 Supports:
@@ -39,7 +43,7 @@ _PRISMA_RELATION_RE = re.compile(r"@relation\s*\(", re.IGNORECASE)
 def collect_sql_files(root: Path, patterns: list):
     files = []
     for p in root.rglob("*.sql"):
-        if not is_skip_dir(p) and not is_ignored(p, root, patterns):
+        if not is_skip_dir(p.relative_to(root)) and not is_ignored(p, root, patterns):
             files.append(p)
     return sorted(files)
 
@@ -47,7 +51,7 @@ def collect_sql_files(root: Path, patterns: list):
 def collect_prisma_files(root: Path, patterns: list):
     files = []
     for p in root.rglob("*.prisma"):
-        if not is_skip_dir(p) and not is_ignored(p, root, patterns):
+        if not is_skip_dir(p.relative_to(root)) and not is_ignored(p, root, patterns):
             files.append(p)
     return sorted(files)
 

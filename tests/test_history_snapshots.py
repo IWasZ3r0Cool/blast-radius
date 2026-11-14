@@ -6,7 +6,9 @@ import copy
 import json
 import sqlite3
 import subprocess
+import sys
 from contextlib import closing
+from io import BytesIO
 
 import pytest
 
@@ -20,6 +22,7 @@ from blastradius.import_graph.parsing import javascript_imports, python_imports
 from blastradius.index import build, db_path_for, git_reachable
 from blastradius.mcp_server import _call_temporal_impact
 from blastradius.store import Store
+from blastradius.store import db as store_db
 from blastradius.temporal import history
 from blastradius.temporal.history import backfill
 
@@ -204,6 +207,51 @@ def test_head_only_index_then_history_handles_removal_reintroduction_and_deletio
     with Artifacts(repo) as artifacts:
         result = _call_temporal_impact({"file": "b.py", "as_of": added}, artifacts)
     assert result["direct_ids"] == ["a.py"]
+
+
+def test_impact_cli_distinguishes_missing_history_from_a_failed_snapshot_read(repo):
+    write(repo, "a.py", "import b\n")
+    write(repo, "b.py", "VALUE = 1\n")
+    baseline = commit(repo, "baseline")
+    write(repo, "b.py", "VALUE = 2\n")
+    head = commit(repo, "update dependency")
+    build(str(repo))
+
+    def impact_at(revision):
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "blastradius.cli",
+                "impact",
+                "b.py",
+                "--as-of",
+                revision,
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    missing = impact_at(baseline)
+    assert missing.returncode == 1
+    assert not missing.stdout
+    assert f"No temporal data for b.py at {baseline}" in missing.stderr
+    assert "Run `blastradius history` to backfill" in missing.stderr
+
+    with closing(sqlite3.connect(db_path_for(repo))) as connection:
+        connection.execute(
+            "ALTER TABLE snapshot_edges RENAME COLUMN target TO incompatible_target"
+        )
+        connection.commit()
+
+    failed = impact_at(head)
+    assert failed.returncode == 1
+    assert not failed.stdout
+    assert failed.stderr.strip() == (
+        "Impact: could not read temporal index: no such column: target"
+    )
 
 
 def test_target_additions_config_changes_and_historical_bytes(repo, monkeypatch):
@@ -553,7 +601,7 @@ def test_backfill_repairs_older_contaminated_index_snapshot(repo, monkeypatch):
     head = commit(repo, "committed source")
     with closing(Store(db_path_for(repo))) as store:
         with monkeypatch.context() as previous_version:
-            previous_version.setattr(import_graph, "EXTRACTION_VERSION", "1")
+            previous_version.setattr(store_db, "FULL_INDEX_SNAPSHOT_VERSION", "1")
             store.record_graph_snapshot(
                 head,
                 {"main.py", "uncommitted.py"},
@@ -570,6 +618,52 @@ def test_backfill_repairs_older_contaminated_index_snapshot(repo, monkeypatch):
         ).fetchone()
         assert row[0] == import_graph.EXTRACTION_VERSION
         assert row[1] != "index"
+
+
+def test_backfill_preserves_full_java_snapshots_from_version_three(
+    repo, monkeypatch, capsys
+):
+    write(repo, "Main.java", "package example;\nimport example.Lib;\nclass Main {}\n")
+    write(repo, "Lib.java", "package example;\nclass Lib {}\n")
+    head = commit(repo, "Java dependency")
+    with monkeypatch.context() as previous_version:
+        previous_version.setattr(store_db, "FULL_INDEX_SNAPSHOT_VERSION", "3")
+        build(str(repo))
+
+    with closing(Store(db_path_for(repo))) as store:
+        before = store.snapshot_graph(head)
+        assert before is not None and before.extraction_version == "3"
+        assert dependents(store, "Lib.java", head) == {"Main.java"}
+        backfill(repo, store)
+        assert store.snapshot_graph(head) == before
+    monkeypatch.chdir(repo)
+    capsys.readouterr()
+    _cmd_impact(
+        _build_parser().parse_args(["impact", "Lib.java", "--as-of", head, "--json"])
+    )
+    assert json.loads(capsys.readouterr().out)["direct_ids"] == ["Main.java"]
+
+
+def test_materialization_reads_blob_payloads_in_bounded_chunks(tmp_path):
+    class BoundedStream(BytesIO):
+        def read(self, size=-1):
+            assert 0 <= size <= 1024 * 1024
+            return super().read(size)
+
+    blob = "a" * 40
+    payload = b"x" * (3 * 1024 * 1024)
+    header = f"{blob} blob {len(payload)}\n".encode("ascii")
+    tree = {"asset.bin": ("100644", blob)}
+    with BoundedStream(header + payload + b"\n") as stream:
+        assert history._read_tree_blobs(stream, tree, tmp_path) == {}
+    asset = tmp_path / "asset.bin"
+    assert asset.read_bytes() == payload
+    asset.unlink()
+    with (
+        BoundedStream(header + payload[:-2]) as stream,
+        pytest.raises(RuntimeError, match="Incomplete Git blob"),
+    ):
+        history._read_tree_blobs(stream, tree, tmp_path)
 
 
 @pytest.mark.parametrize("extension", ["py", "ts"])

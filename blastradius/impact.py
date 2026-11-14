@@ -1,8 +1,26 @@
-"""Blast-radius computation: direct + transitive dependents + numeric score."""
-
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
 from __future__ import annotations
 
+"""Blast-radius computation: direct + transitive dependents + numeric score."""
+
 from collections import defaultdict, deque
+from collections.abc import Iterable
+
+_NON_FILE_TYPES = {"import", "service", "pipeline", "database"}
+
+
+def is_file_node(node: dict) -> bool:
+    return node.get("type") not in _NON_FILE_TYPES
+
+
+def rank_blast_files(nodes: Iterable[dict], threshold: float) -> list[dict]:
+    """Rank file nodes by score, preserving input order for ties."""
+    return sorted(
+        (n for n in nodes if is_file_node(n) and n.get("blast_score", 0) >= threshold),
+        key=lambda n: n.get("blast_score", 0),
+        reverse=True,
+    )
 
 
 def compute_blast_radius(nodes: list[dict], links: list[dict]) -> dict[str, dict]:

@@ -7,10 +7,14 @@ from __future__ import annotations
 Dependency rule: must not import from blastradius.graph or blastradius.semantic.
 """
 
+import os
 import subprocess
 import sys
 from collections import OrderedDict
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from tempfile import TemporaryFile
+from threading import Event, Timer
+from typing import BinaryIO
 
 from blastradius.import_graph import ImportGraph, Snapshot, report_diagnostics
 from blastradius.import_graph.parsing import ParsedSource, parse
@@ -75,18 +79,39 @@ def git_log(
     return commits
 
 
-def git_ls_tree(root: Path, commit_hash: str) -> dict[str, str]:
-    """Return {repo_relative_path: blob_hash} for all files at commit."""
-    out = _run(["git", "ls-tree", "-rz", "--full-tree", commit_hash], root)
+def _tree_blobs(root: Path, commit_hash: str) -> dict[str, tuple[str, str]]:
+    """Read path -> (mode, blob hash) for regular files and symlinks."""
+    result = subprocess.run(
+        ["git", "ls-tree", "-rz", "--full-tree", commit_hash],
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=60,
+        check=True,
+    )
     tree = {}
-    for entry in out.split("\0"):
-        if "\t" not in entry:
+    for entry in result.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        if not entry:
             continue
         meta, path = entry.split("\t", 1)
-        parts = meta.split()
-        if len(parts) == 3 and parts[0] in {"100644", "100755"} and parts[1] == "blob":
-            tree[path] = parts[2]
+        mode, kind, blob_hash = meta.split()
+        if kind == "blob" and mode in {"100644", "100755", "120000"}:
+            tree[path] = (mode, blob_hash)
     return tree
+
+
+def git_ls_tree(root: Path, commit_hash: str) -> dict[str, str]:
+    """Return the regular-file blobs used by the historical import extractor."""
+    return {
+        path: blob
+        for path, (mode, blob) in _tree_blobs(root, commit_hash).items()
+        if mode != "120000"
+    }
+
+
+def git_tracked_paths(root: Path, commit_hash: str) -> set[str]:
+    """Return tracked file and symlink paths, excluding submodule entries."""
+    return set(_tree_blobs(root, commit_hash))
 
 
 def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, bytes]:
@@ -141,7 +166,218 @@ def _git_cat_file_batch(root: Path, blob_hashes: list) -> dict[str, bytes]:
     return results
 
 
+def _invalid_path_part(part: str) -> bool:
+    return Path(part).name != part or (
+        os.name == "nt"
+        and (
+            ":" in part
+            or part != part.rstrip(" .")
+            or PureWindowsPath(part).is_reserved()
+        )
+    )
+
+
+def _read_tree_blobs(
+    stream: BinaryIO, tree: dict[str, tuple[str, str]], destination: Path
+) -> dict[Path, str]:
+    symlinks = {}
+    for path, (mode, blob) in tree.items():
+        parts = path.split("/")
+        if any(part in {"", ".", ".."} or _invalid_path_part(part) for part in parts):
+            raise ValueError(f"Unsupported Git path: {path!r}")
+
+        header = stream.readline(256)
+        fields = header.split()
+        if (
+            not header.endswith(b"\n")
+            or len(fields) != 3
+            or fields[:2] != [blob.encode("ascii"), b"blob"]
+            or not fields[2].isdigit()
+        ):
+            raise RuntimeError(f"Invalid git cat-file response for {path!r}")
+        size = int(fields[2])
+
+        target = destination.joinpath(*parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Placeholders let symlink validation use the temporary filesystem's own
+        # case and filename matching before any symlink can be followed.
+        with target.open("xb") as file:
+            if mode == "120000":
+                if size > 64 * 1024:
+                    raise ValueError(f"Git symlink target is too long: {path!r}")
+                data = stream.read(size)
+                if len(data) != size:
+                    raise RuntimeError(f"Incomplete Git blob for {path!r}")
+                symlinks[target] = os.fsdecode(data)
+            else:
+                remaining = size
+                while remaining:
+                    data = stream.read(min(remaining, 1024 * 1024))
+                    if not data:
+                        raise RuntimeError(f"Incomplete Git blob for {path!r}")
+                    file.write(data)
+                    remaining -= len(data)
+        if stream.read(1) != b"\n":
+            raise RuntimeError(f"Missing Git blob terminator for {path!r}")
+    return symlinks
+
+
+def _file_identity(path: Path) -> tuple[int, int]:
+    info = path.stat()
+    return info.st_dev, info.st_ino
+
+
+def _safe_link_destination(
+    root: Path, path: Path, targets: dict[tuple[int, int], str]
+) -> Path | None:
+    """Resolve a chain using the regular-file placeholders in the temporary tree."""
+    parts = list(path.parent.relative_to(root).parts)
+    remaining = [path.name]
+    expansions = 0
+    while remaining:
+        part = remaining.pop()
+        if part == "..":
+            if not parts:
+                return None
+            parts.pop()
+            continue
+        if _invalid_path_part(part):
+            return None
+        try:
+            target = targets.get(_file_identity(root.joinpath(*parts, part)))
+        except (FileNotFoundError, NotADirectoryError):
+            target = None
+        if target is None:
+            parts.append(part)
+            continue
+
+        expansions += 1
+        link = Path(target)
+        if expansions > 64 or not target or "\0" in target or link.anchor:
+            return None
+        remaining.extend(reversed(link.parts))
+    return root.joinpath(*parts)
+
+
+def materialize_commit(root: Path, commit_hash: str, destination: Path) -> None:
+    """Stream tracked blobs into an empty temporary directory for full analysis."""
+    tree = _tree_blobs(root, commit_hash)
+    if not tree:
+        return
+
+    command = ["git", "cat-file", "--batch"]
+    timeout = 60
+    timed_out = Event()
+    # Use files for requests and stderr so the child can stream stdout without
+    # blocking on either of the other channels.
+    with TemporaryFile() as requests, TemporaryFile() as errors:
+        for _, blob in tree.values():
+            requests.write(blob.encode("ascii") + b"\n")
+        requests.seek(0)
+        with subprocess.Popen(
+            command, cwd=root, stdin=requests, stdout=subprocess.PIPE, stderr=errors
+        ) as proc:
+            assert proc.stdout is not None
+
+            def expire() -> None:
+                timed_out.set()
+                proc.kill()
+
+            timer = Timer(timeout, expire)
+            timer.start()
+            try:
+                symlinks = _read_tree_blobs(proc.stdout, tree, destination)
+                if proc.stdout.read(1):
+                    raise RuntimeError("Unexpected trailing git cat-file output")
+                if proc.wait():
+                    errors.seek(0)
+                    detail = errors.read(4096).decode("utf-8", errors="replace").strip()
+                    raise RuntimeError(f"git cat-file failed: {detail}")
+            except RuntimeError as exc:
+                if timed_out.is_set():
+                    raise subprocess.TimeoutExpired(command, timeout) from exc
+                raise
+            finally:
+                timer.cancel()
+                timer.join()
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+
+    targets = {_file_identity(path): target for path, target in symlinks.items()}
+    safe_links = []
+    for path, target in symlinks.items():
+        resolved = _safe_link_destination(destination, path, targets)
+        if resolved is not None:
+            safe_links.append((path, target, os.name == "nt" and resolved.is_dir()))
+    for path in symlinks:
+        path.unlink()
+    for path, target, is_dir in safe_links:
+        path.symlink_to(target, target_is_directory=is_dir)
+
+
 # ── backfill ──────────────────────────────────────────────────────────────────
+
+
+def _extract_graph(
+    root: Path,
+    tree: dict[str, str],
+    blob_cache: OrderedDict[str, bytes],
+    parsed_cache: dict[str, tuple[str, ParsedSource]],
+) -> tuple[set[str], set[tuple[str, str]], set[str]]:
+    # Prefetch bytes in batches, including common configuration files.
+    hashes = {
+        blob
+        for path, blob in tree.items()
+        if not skipped(path)
+        and (
+            PurePosixPath(path).suffix.lower()
+            in SOURCE_EXTENSIONS | {".json", ".jsonc"}
+            or PurePosixPath(path).name in {"go.mod", "go.work", "Cargo.toml"}
+        )
+    }
+    # skipped() excludes dotfiles; .gitignore is nevertheless configuration.
+    if ".gitignore" in tree:
+        hashes.add(tree[".gitignore"])
+    contents = {blob: blob_cache[blob] for blob in hashes if blob in blob_cache}
+    contents.update(_git_cat_file_batch(root, sorted(hashes - contents.keys())))
+
+    def read_blob(path: str) -> bytes:
+        blob = tree[path]
+        if blob not in contents:
+            # Configuration extends may refer to any file advertised by the snapshot.
+            if blob in blob_cache:
+                contents[blob] = blob_cache[blob]
+            else:
+                contents.update(_git_cat_file_batch(root, [blob]))
+        return contents[blob]
+
+    snapshot = Snapshot(set(tree), read_blob)
+    # Retain syntax only for the current tree. Resolve it afresh so unchanged
+    # importers can acquire new targets or follow changed configuration.
+    parsed = {
+        path: (
+            parsed_cache[path]
+            if path in parsed_cache and parsed_cache[path][0] == tree[path]
+            else (tree[path], parse(path, snapshot.read(path)))
+        )
+        for path in sorted(snapshot.files)
+        if PurePosixPath(path).suffix in SOURCE_EXTENSIONS
+    }
+    parsed_cache.clear()
+    parsed_cache.update(parsed)
+    graph = ImportGraph(
+        snapshot,
+        parsed_sources={path: entry[1] for path, entry in parsed.items()},
+    )
+    nodes, edges = graph.graph()
+    # Include on-demand reads in the cross-commit cache as well.
+    for blob, content in contents.items():
+        blob_cache[blob] = content
+        blob_cache.move_to_end(blob)
+    while len(blob_cache) > 512:
+        blob_cache.popitem(last=False)
+    return nodes, edges, graph.diagnostics
 
 
 def backfill(
@@ -183,7 +419,6 @@ def backfill(
     for commit in commits:
         h = commit["hash"]
         curr_tree = git_ls_tree(root, h)
-        known_files = set(curr_tree.keys())
 
         # ── file temporal tracking ────────────────────────────────────────────
         for path in curr_tree:
@@ -191,60 +426,10 @@ def backfill(
                 file_first_seen[path] = h
             file_last_seen_alive[path] = h
 
-        # Prefetch bytes in batches, including common configuration files.
-        readable = [
-            path
-            for path in curr_tree
-            if not skipped(path)
-            and (
-                PurePosixPath(path).suffix.lower()
-                in SOURCE_EXTENSIONS | {".json", ".jsonc"}
-                or PurePosixPath(path).name in {"go.mod", "go.work", "Cargo.toml"}
-                or path == ".gitignore"
-            )
-        ]
-        # skipped() excludes dotfiles; .gitignore is nevertheless configuration.
-        if ".gitignore" in curr_tree and ".gitignore" not in readable:
-            readable.append(".gitignore")
-        hashes = {curr_tree[path] for path in readable}
-        contents = {blob: blob_cache[blob] for blob in hashes if blob in blob_cache}
-        contents.update(_git_cat_file_batch(root, sorted(hashes - contents.keys())))
-
-        def read_blob(path, tree=curr_tree, contents=contents):
-            blob = tree[path]
-            if blob not in contents:
-                # Prefetch extensions are only an optimization. Configuration
-                # extends may refer to any file advertised by the snapshot.
-                if blob in blob_cache:
-                    contents[blob] = blob_cache[blob]
-                else:
-                    contents.update(_git_cat_file_batch(root, [blob]))
-            return contents[blob]
-
-        snapshot = Snapshot(known_files, read_blob)
-        # Retain syntax only for the current tree. Resolve it afresh so unchanged
-        # importers can acquire new targets or follow changed configuration.
-        parsed_cache = {
-            path: (
-                parsed_cache[path]
-                if path in parsed_cache and parsed_cache[path][0] == curr_tree[path]
-                else (curr_tree[path], parse(path, snapshot.read(path)))
-            )
-            for path in sorted(snapshot.files)
-            if PurePosixPath(path).suffix in SOURCE_EXTENSIONS
-        }
-        graph = ImportGraph(
-            snapshot,
-            parsed_sources={path: entry[1] for path, entry in parsed_cache.items()},
+        nodes, edges, commit_diagnostics = _extract_graph(
+            root, curr_tree, blob_cache, parsed_cache
         )
-        nodes, edges = graph.graph()
-        # Include on-demand reads in the cross-commit cache as well.
-        for blob, content in contents.items():
-            blob_cache[blob] = content
-            blob_cache.move_to_end(blob)
-        while len(blob_cache) > 512:
-            blob_cache.popitem(last=False)
-        diagnostics.update(graph.diagnostics)
+        diagnostics.update(commit_diagnostics)
         store.record_graph_snapshot(h, nodes, edges)
         for source, target in edges:
             key = (source, target, "imports")

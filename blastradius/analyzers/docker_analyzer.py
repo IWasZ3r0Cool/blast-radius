@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Docker / Docker Compose analyzer.
 
 Produces service-level nodes from docker-compose files and Dockerfiles.
@@ -50,7 +54,7 @@ def collect_compose_files(root: Path, patterns: list):
     for p in root.rglob("*"):
         if (
             p.name in COMPOSE_NAMES
-            and not is_skip_dir(p)
+            and not is_skip_dir(p.relative_to(root))
             and not is_ignored(p, root, patterns)
         ):
             found.append(p)
@@ -60,7 +64,7 @@ def collect_compose_files(root: Path, patterns: list):
 def collect_dockerfiles(root: Path, patterns: list):
     found = []
     for p in root.rglob("Dockerfile*"):
-        if not is_skip_dir(p) and not is_ignored(p, root, patterns):
+        if not is_skip_dir(p.relative_to(root)) and not is_ignored(p, root, patterns):
             found.append(p)
     return sorted(found)
 

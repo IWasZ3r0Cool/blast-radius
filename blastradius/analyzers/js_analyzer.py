@@ -234,7 +234,7 @@ def analyze(root: Path, group_map: dict):
         total_loc += loc
 
         lang = detect_language(f)
-        ntype = node_type(f, source)
+        ntype = node_type(f.relative_to(root), source)
 
         result = imports.analyze(rel.replace("\\", "/"), source_bytes)
 

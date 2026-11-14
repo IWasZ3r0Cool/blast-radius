@@ -348,7 +348,7 @@ def test_backfill_upgrades_old_go_rust_snapshots_and_preserves_full_index(
             (first,),
         ).fetchone()
         assert info[0] == import_graph.HISTORY_COVERAGE
-        assert info[1] == "3"
+        assert info[1] == import_graph.EXTRACTION_VERSION
 
 
 @pytest.mark.parametrize("language", ["go", "rust"])

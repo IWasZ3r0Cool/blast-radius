@@ -1,3 +1,7 @@
+# Copyright 2026 David Scheiderman
+# Licensed under the Apache License, Version 2.0
+from __future__ import annotations
+
 """Java / Kotlin repository analyzer.
 
 Uses a two-pass approach:
@@ -43,12 +47,12 @@ def collect_files(root: Path, patterns: list):
     files = []
     for ext in JAVA_EXTENSIONS:
         for p in root.rglob(f"*{ext}"):
-            if is_skip_dir(p) or is_ignored(p, root, patterns):
+            if is_skip_dir(p.relative_to(root)) or is_ignored(p, root, patterns):
                 continue
             # Skip generated files (common patterns)
             if any(
                 part in {"generated", "generated-sources", "build", "target"}
-                for part in p.parts
+                for part in p.relative_to(root).parts
             ):
                 continue
             files.append(p)
@@ -153,7 +157,7 @@ def analyze(root: Path, group_map: dict):
         nodes.append(
             {
                 "id": rel,
-                "type": node_type(f),
+                "type": node_type(f.relative_to(root)),
                 "language": detect_language(f),
                 "size": loc,
                 "loc": loc,
