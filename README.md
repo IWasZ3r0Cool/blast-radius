@@ -1,6 +1,6 @@
 # blastradius
 
-Modified by Christopher Wilson.
+Maintained and actively developed by Christopher Wilson.
 
 [Source repository](https://github.com/IWasZ3r0Cool/blast-radius) ·
 [Issues](https://github.com/IWasZ3r0Cool/blast-radius/issues) ·
