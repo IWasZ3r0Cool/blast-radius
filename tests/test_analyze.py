@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from blastradius.analyze import detect_languages
+from blastradius.analyzers.base import is_skip_dir
+from blastradius.import_graph.snapshot import skipped
 
 
 def _touch(root: Path, relative: str) -> None:
@@ -44,20 +46,24 @@ def test_nested_excluded_directories_do_not_trigger_detection(
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("source", "excluded"),
     [
-        "out/module.py",
-        "coverage/module.py",
-        ".generated/module.py",
-        "src/.example.py",
-        "build_tools/module.py",
+        ("out/module.py", True),
+        ("coverage/module.py", True),
+        (".generated/module.py", True),
+        ("src/.example.py", True),
+        ("src/vendor/module.py", True),
+        ("build_tools/module.py", False),
+        ("src/Out/module.py", False),
     ],
 )
-def test_detection_retains_paths_outside_its_fixed_exclusions(
-    tmp_path: Path, source: str
+def test_detection_and_collection_agree_on_path_exclusions(
+    tmp_path: Path, source: str, excluded: bool
 ) -> None:
     _touch(tmp_path, source)
-    assert detect_languages(tmp_path) == ["python"]
+    assert is_skip_dir(Path(source)) == excluded
+    assert skipped(source) == excluded
+    assert detect_languages(tmp_path) == ([] if excluded else ["python"])
 
 
 def test_detection_does_not_apply_gitignore(tmp_path: Path) -> None:
@@ -66,11 +72,13 @@ def test_detection_does_not_apply_gitignore(tmp_path: Path) -> None:
     assert detect_languages(tmp_path) == ["python"]
 
 
-def test_excluded_matches_do_not_prevent_later_globs_from_matching(
-    tmp_path: Path,
+@pytest.mark.parametrize("extension", ["js", "ts"])
+def test_excluded_matches_do_not_prevent_eligible_matches(
+    tmp_path: Path, extension: str
 ) -> None:
-    _touch(tmp_path, "node_modules/dependency.js")
-    _touch(tmp_path, "src/application.ts")
+    _touch(tmp_path, "coverage/report.js")
+    assert detect_languages(tmp_path) == []
+    _touch(tmp_path, f"src/application.{extension}")
     assert detect_languages(tmp_path) == ["javascript"]
 
 

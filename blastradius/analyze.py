@@ -8,6 +8,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from blastradius._path_exclusions import is_excluded_path
 from blastradius.analyzers import (
     ci_analyzer,
     css_analyzer,
@@ -25,33 +26,18 @@ from blastradius.analyzers import (
 from blastradius.analyzers.cross_lang_analyzer import find_api_boundaries
 from blastradius.analyzers.monorepo_analyzer import assign_packages, detect_workspaces
 
-# Fixed exclusions for language detection, distinct from analyzer collection rules.
-_DETECTION_SKIP_DIRS = {
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    ".git",
-    "node_modules",
-    "dist",
-    "build",
-    ".next",
-    "target",
-    "vendor",
-    ".bundle",
-}
-
 
 def _any_match(root: Path, globs: list[str]) -> bool:
-    """Find a glob match with no excluded name relative to the repository root."""
-    for glob in globs:
-        for path in root.rglob(glob):
-            if _DETECTION_SKIP_DIRS.isdisjoint(path.relative_to(root).parts):
-                return True
-    return False
+    """Find the first eligible glob match relative to the repository root."""
+    return any(
+        not is_excluded_path(path.relative_to(root).parts)
+        for glob in globs
+        for path in root.rglob(glob)
+    )
 
 
 def detect_languages(root: Path) -> list:
+    """Detect source by glob and check root manifests and CI markers separately."""
     langs = []
     if _any_match(root, ["*.py"]):
         langs.append("python")

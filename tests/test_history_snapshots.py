@@ -19,7 +19,7 @@ from blastradius.cli import _build_parser, _cmd_impact
 from blastradius.impact import compute_blast_radius
 from blastradius.import_graph import ImportGraph, Snapshot
 from blastradius.import_graph.parsing import javascript_imports, python_imports
-from blastradius.index import build, db_path_for, git_reachable
+from blastradius.index import analyze_commit, build, db_path_for, git_reachable
 from blastradius.mcp_server import _call_temporal_impact
 from blastradius.store import Store
 from blastradius.store import db as store_db
@@ -376,8 +376,11 @@ def test_git_snapshot_parity_with_working_index(repo):
     write(repo, "main.ts", 'import "@/value";\n')
     write(repo, "tsconfig.json", '{"compilerOptions":{"paths":{"@/*":["src/*"]}}}')
     write(repo, "src/value.ts", "export const value = 1;\n")
+    write(repo, "out/ignored.py", "from pkg import utils\n")
+    write(repo, "src/.hidden.ts", 'import "@/value";\n')
     head = commit(repo, "fixture")
     expected_nodes, expected_edges = ImportGraph(Snapshot.directory(repo)).graph()
+    assert expected_nodes.isdisjoint({"out/ignored.py", "src/.hidden.ts"})
     with closing(Store(db_path_for(repo))) as store:
         backfill(repo, store)
         assert snapshot_edges(store, head) == expected_edges
@@ -385,6 +388,21 @@ def test_git_snapshot_parity_with_working_index(repo):
             row[0] for row in store._conn.execute("SELECT path FROM snapshot_nodes")
         }
         assert nodes == expected_nodes
+
+
+@pytest.mark.parametrize("eligible_dockerfile", [False, True])
+def test_nested_compose_requires_a_docker_trigger(repo, eligible_dockerfile):
+    write(repo, "services/compose.yaml", "services:\n  app:\n    image: alpine:3\n")
+    write(repo, "coverage/Dockerfile", "FROM alpine:3\n")
+    if eligible_dockerfile:
+        write(repo, "src/Dockerfile", "FROM alpine:3\n")
+    head = commit(repo, "docker fixtures")
+
+    for graph in (analyze(str(repo)), analyze_commit(repo, head)):
+        assert ("docker" in graph["meta"]["languages"]) == eligible_dockerfile
+        node_ids = {node["id"] for node in graph["nodes"]}
+        assert ("services/app" in node_ids) == eligible_dockerfile
+        assert "coverage/Dockerfile" not in node_ids
 
 
 def test_version_three_migration_does_not_infer_snapshots(tmp_path, monkeypatch):

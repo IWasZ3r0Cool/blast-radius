@@ -1,28 +1,12 @@
 # Modified by Christopher Wilson.
 """Shared utilities for all language analyzers."""
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
 
-# Directories to skip during file collection
-SKIP_DIRS = {
-    "__pycache__",
-    "node_modules",
-    ".venv",
-    "venv",
-    "env",
-    ".git",
-    "dist",
-    "build",
-    ".next",
-    "out",
-    "coverage",
-    ".turbo",
-    ".cache",
-    "target",
-    "vendor",
-    ".expo",
-}
+from blastradius._path_exclusions import is_excluded_path
 
 
 def load_gitignore_patterns(root: Path) -> list:
@@ -49,7 +33,7 @@ def is_ignored(path: Path, root: Path, patterns: list) -> bool:
 
 
 def is_skip_dir(path: Path) -> bool:
-    return any(part.startswith(".") or part in SKIP_DIRS for part in path.parts)
+    return is_excluded_path(path.parts)
 
 
 def dir_group(path: Path, root: Path, group_map: dict) -> int:

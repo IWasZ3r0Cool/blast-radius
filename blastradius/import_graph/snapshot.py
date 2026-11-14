@@ -11,24 +11,8 @@ import re
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-SKIP_DIRS = {
-    "__pycache__",
-    "node_modules",
-    ".venv",
-    "venv",
-    "env",
-    ".git",
-    "dist",
-    "build",
-    ".next",
-    "out",
-    "coverage",
-    ".turbo",
-    ".cache",
-    "target",
-    "vendor",
-    ".expo",
-}
+from blastradius._path_exclusions import is_excluded_path
+
 JS_EXTENSIONS = frozenset(
     {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".vue"}
 )
@@ -52,9 +36,7 @@ def ignore_patterns(content: str) -> list[re.Pattern]:
 
 
 def skipped(path: str) -> bool:
-    return any(
-        part.startswith(".") or part in SKIP_DIRS for part in PurePosixPath(path).parts
-    )
+    return is_excluded_path(PurePosixPath(path).parts)
 
 
 def normalize(path: str) -> str | None:
