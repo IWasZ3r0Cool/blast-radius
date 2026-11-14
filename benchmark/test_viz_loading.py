@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 David Scheiderman
+# Copyright 2026 Christopher Wilson
 # Licensed under the Apache License, Version 2.0
 """Viz loading benchmark: synthetic graphs + static HTML checks.
 

@@ -1,5 +1,7 @@
 # Refactor patterns
 
+Authored by Christopher Wilson.
+
 ## Extract interface
 
 For a file with many direct dependents, consider whether a small interface could

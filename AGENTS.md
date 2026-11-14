@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Modified by Christopher Wilson.
+
 ## Developer Commands & Verification
 
 - **Run unit tests**: `uv run pytest` (or single test: `uv run pytest tests/test_phase1.py` / `uv run pytest -k <name>`).
@@ -42,10 +44,32 @@
 
 ## Coding Conventions
 
-- **Module header**: Every Python file starts with:
+### File attribution
+
+Preserve applicable upstream and third-party copyright, license, and attribution notices. Check the file's history and the source of copied or adapted material before changing a notice. Leave uncertain notices in place and record the open question in the pull request.
+
+- **Inherited files**: Keep the existing notices. A Python header inherited from upstream may look like this:
   ```python
   # Copyright 2026 David Scheiderman
   # Licensed under the Apache License, Version 2.0
   from __future__ import annotations
   ```
-- **Python version**: Targets Python 3.10+. Keep `from __future__ import annotations` in every Python module.
+- **Modified upstream files**: Keep the notices and add a prominent line identifying who modified the file. Follow [Apache License 2.0 section 4](https://www.apache.org/licenses/LICENSE-2.0#redistribution).
+  ```python
+  # Copyright 2026 David Scheiderman
+  # Licensed under the Apache License, Version 2.0
+  # Modified by Christopher Wilson.
+  from __future__ import annotations
+  ```
+- **Wholly original files**: Credit the actual author or authors. Use a copyright notice when the rights holder and year are known. When only authorship is verified, use `Authored by <name>` and keep the license statement. This example applies to an original contribution by Christopher Wilson for which he holds the copyright:
+  ```python
+  # Copyright 2026 Christopher Wilson
+  # Licensed under the Apache License, Version 2.0
+  from __future__ import annotations
+  ```
+
+Use the file format's comment syntax or an attribution line in Markdown. Preserve shebangs, encoding declarations, and front matter. Record attribution in the pull request for files that cannot carry a notice without affecting their format or expected contents. Keep generated and vendored artifacts intact.
+
+### Python compatibility
+
+Target Python 3.10+. Keep `from __future__ import annotations` in every Python module, after the module docstring if present.

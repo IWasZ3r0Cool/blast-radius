@@ -1,5 +1,7 @@
 # CKG-INTERNALS: blastradius Internal Architecture
 
+Modified by Christopher Wilson.
+
 | | |
 |---|---|
 | **Doc ID** | CKG-INTERNALS-001 |

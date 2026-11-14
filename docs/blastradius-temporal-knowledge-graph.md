@@ -1,5 +1,7 @@
 # blastradius → Temporal Code Knowledge Graph
 
+Modified by Christopher Wilson.
+
 | | |
 |---|---|
 | **Doc ID** | CKG-DESIGN-001 |
@@ -312,7 +314,7 @@ Python 3.10+. The core layering and optional semantic-extension constraints rema
 5. **No external services.** No graph DB, no cloud APIs. Embeddings come from a configurable local endpoint; absence degrades gracefully.
 6. **Never modify the working tree during history ingestion.** Read blobs via git plumbing only.
 7. **Every phase keeps existing tests green and adds tests for new code.** No phase regresses the prior phase.
-8. **Apache 2.0 headers and `Copyright 2026 David Scheiderman` preserved** on new files.
+8. **Preserve applicable Apache 2.0 and upstream attribution notices.** Follow the [file attribution policy](../AGENTS.md#file-attribution) for modified and new files.
 9. **Python 3.9+ compatibility** maintained.
 
 ## 10. Testing strategy

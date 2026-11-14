@@ -1,5 +1,6 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
+# Modified by Christopher Wilson.
 from __future__ import annotations
 
 """Install / uninstall a pre-commit hook that reports blast radius for staged files."""

@@ -1,5 +1,7 @@
 # GitHub project automation
 
+Authored by Christopher Wilson.
+
 ## Optional project assignment
 
 The `Add to project` workflow adds opened, reopened, or labeled issues and pull

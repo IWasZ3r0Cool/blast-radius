@@ -1,5 +1,7 @@
 # blastradius Evaluation Prompt
 
+Modified by Christopher Wilson.
+
 Copy and paste the following prompt into Claude Code from inside the repo you want to evaluate.
 Requires blastradius v0.3.6+ installed and `blastradius analyze` already run.
 

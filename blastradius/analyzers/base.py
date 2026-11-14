@@ -1,3 +1,4 @@
+# Modified by Christopher Wilson.
 """Shared utilities for all language analyzers."""
 
 import re

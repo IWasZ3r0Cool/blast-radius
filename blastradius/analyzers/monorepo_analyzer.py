@@ -1,3 +1,4 @@
+# Modified by Christopher Wilson.
 """Monorepo / workspace detector.
 
 Reads workspace configuration files to identify packages/workspaces within a

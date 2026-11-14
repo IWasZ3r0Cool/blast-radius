@@ -1,3 +1,4 @@
+# Modified by Christopher Wilson.
 """CI/CD pipeline analyzer.
 
 Supports:

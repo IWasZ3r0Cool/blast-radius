@@ -1,5 +1,6 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
+# Modified by Christopher Wilson.
 """Hybrid query engine: semantic KNN + FTS5 keyword + graph expansion, fused with RRF."""
 
 from __future__ import annotations

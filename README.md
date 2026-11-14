@@ -1,5 +1,7 @@
 # blastradius
 
+Modified by Christopher Wilson.
+
 [Source repository](https://github.com/IWasZ3r0Cool/blast-radius) ·
 [Issues](https://github.com/IWasZ3r0Cool/blast-radius/issues) ·
 [PyPI package](https://pypi.org/project/blastradius-cli/)
