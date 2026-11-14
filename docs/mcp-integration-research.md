@@ -1,5 +1,7 @@
 # MCP integration research
 
+Authored by Christopher Wilson.
+
 Checked 2026-08-30 against official protocol, SDK, tooling, and client documentation.
 This is a recommendation report, not a claim that the implementation passes conformance.
 No publishing, client registration, or runtime changes were made for this research.

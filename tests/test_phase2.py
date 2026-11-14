@@ -1,5 +1,6 @@
 # Copyright 2026 David Scheiderman
 # Licensed under the Apache License, Version 2.0
+# Modified by Christopher Wilson.
 """Phase 2 acceptance tests.
 
 Acceptance criteria (from CKG-DESIGN-001):

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Modified by Christopher Wilson.
 """
 CLI integration tests for: lookup, dependencies, high-blast.
 
