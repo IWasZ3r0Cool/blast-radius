@@ -6,7 +6,93 @@ import copy
 
 import pytest
 
-from blastradius.reporter import format_markdown, format_stdout
+from blastradius.reporter import build_agent_impact, format_markdown, format_stdout
+
+
+def test_agent_impact_limits_each_group_and_preserves_totals():
+    target = "auth.py"
+    direct = [f"routes/route_{i:02d}.py" for i in range(25)]
+    transitive = [f"services/service_{i:02d}.py" for i in range(24)]
+    graph = {
+        "nodes": [{"id": nid} for nid in [target, *direct, *transitive]],
+        "links": [
+            *({"source": nid, "target": target} for nid in direct),
+            *({"source": nid, "target": direct[0]} for nid in transitive),
+        ],
+    }
+
+    bounded = build_agent_impact(graph, target)
+    full = build_agent_impact(graph, target, all_dependents=True)
+    assert bounded["blast_score"] == full["blast_score"] == 37.0
+    assert bounded["risk_level"] == full["risk_level"] == "CRITICAL"
+    assert full["direct"] == {
+        "items": [{"id": nid} for nid in direct],
+        "total": 25,
+        "omitted": 0,
+    }
+    assert full["transitive"] == {
+        "items": [{"id": nid, "path": [target, direct[0], nid]} for nid in transitive],
+        "total": 24,
+        "omitted": 0,
+    }
+    for group, omitted in (("direct", 5), ("transitive", 4)):
+        assert bounded[group] == {
+            "items": full[group]["items"][:20],
+            "total": full[group]["total"],
+            "omitted": omitted,
+        }
+
+
+def test_agent_impact_orders_dependents_and_ties_independent_of_graph_order():
+    graph = {
+        "nodes": [
+            {"id": nid}
+            for nid in (
+                "target.py",
+                "left.py",
+                "right.py",
+                "leaf.py",
+                "deep.py",
+                "another.py",
+            )
+        ],
+        "links": [
+            {"source": "right.py", "target": "target.py"},
+            {"source": "left.py", "target": "target.py"},
+            {"source": "leaf.py", "target": "right.py"},
+            {"source": "leaf.py", "target": "left.py"},
+            {"source": "another.py", "target": "right.py"},
+            {"source": "deep.py", "target": "leaf.py"},
+            {"source": "target.py", "target": "leaf.py"},
+        ],
+    }
+
+    response = build_agent_impact(graph, "target.py")
+    reversed_graph = {key: values[::-1] for key, values in graph.items()}
+    assert build_agent_impact(reversed_graph, "target.py") == response
+    assert response == {
+        "schema_version": 1,
+        "target": {"id": "target.py"},
+        "blast_score": 3.5,
+        "risk_level": "CRITICAL",
+        "direct": {
+            "items": [{"id": "left.py"}, {"id": "right.py"}],
+            "total": 2,
+            "omitted": 0,
+        },
+        "transitive": {
+            "items": [
+                {"id": "another.py", "path": ["target.py", "right.py", "another.py"]},
+                {"id": "leaf.py", "path": ["target.py", "left.py", "leaf.py"]},
+                {
+                    "id": "deep.py",
+                    "path": ["target.py", "left.py", "leaf.py", "deep.py"],
+                },
+            ],
+            "total": 3,
+            "omitted": 0,
+        },
+    }
 
 
 @pytest.fixture
