@@ -6,7 +6,7 @@ from __future__ import annotations
 """Blast-radius computation: direct + transitive dependents + numeric score."""
 
 from collections import defaultdict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 _NON_FILE_TYPES = {"import", "service", "pipeline", "database"}
 
@@ -24,7 +24,9 @@ def rank_blast_files(nodes: Iterable[dict], threshold: float) -> list[dict]:
     )
 
 
-def compute_blast_radius(nodes: list[dict], links: list[dict]) -> dict[str, dict]:
+def compute_blast_radius(
+    nodes: list[dict], links: list[dict], *, target: str | None = None
+) -> dict[str, dict]:
     """
     Returns a mapping of node_id -> {
         direct_dependents: int,
@@ -36,25 +38,30 @@ def compute_blast_radius(nodes: list[dict], links: list[dict]) -> dict[str, dict
     }
 
     blast_score = direct_dependents + (0.5 * transitive_dependents)
+    A single target uses lexical order to break ties between shortest paths.
     """
     node_ids = {n["id"] for n in nodes}
 
-    # Build forward adjacency (who does X import?)
-    forward: dict[str, set[str]] = defaultdict(set)
     # Build reverse adjacency (who imports X?)
-    reverse: dict[str, set[str]] = defaultdict(set)
+    reverse_sets: dict[str, set[str]] = defaultdict(set)
 
     for link in links:
         s, t = link["source"], link["target"]
         if s in node_ids and t in node_ids:
-            forward[s].add(t)
-            reverse[t].add(s)
+            reverse_sets[t].add(s)
+
+    reverse: Mapping[str, Iterable[str]] = reverse_sets
+    targets: Iterable[str] = (node["id"] for node in nodes)
+    if target is not None:
+        if target not in node_ids:
+            return {}
+        targets = (target,)
+        reverse = {nid: sorted(dependents) for nid, dependents in reverse_sets.items()}
 
     results: dict[str, dict] = {}
-
-    for node in nodes:
-        nid = node["id"]
-        direct_ids = list(reverse[nid])
+    for nid in targets:
+        direct_ids = list(reverse.get(nid, ()))
+        direct = set(direct_ids)
 
         # BFS upward through reverse graph to find all transitive dependents
         visited: set[str] = set()
@@ -68,12 +75,12 @@ def compute_blast_radius(nodes: list[dict], links: list[dict]) -> dict[str, dict
         while queue:
             current, path = queue.popleft()
             dep_paths[current] = path
-            for parent in reverse[current]:
+            for parent in reverse.get(current, ()):
                 if parent not in visited and parent != nid:
                     visited.add(parent)
                     queue.append((parent, path + [parent]))
 
-        transitive_ids = [n for n in visited if n not in set(direct_ids)]
+        transitive_ids = [n for n in visited if n not in direct]
         d = len(direct_ids)
         t = len(transitive_ids)
 

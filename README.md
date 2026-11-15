@@ -216,6 +216,7 @@ blastradius symbols ./myapp --inline --claude-md
 
 ```bash
 blastradius impact FILE [--index PATH] [--out FILE] [--json] [--as-of REF] [--guidance-threshold N]
+blastradius impact FILE --agent-format [--index PATH] [--all-dependents]
 ```
 
 Shows the blast-radius impact for a specific file: direct dependents, transitive dependents, blast score, and risk level.
@@ -273,6 +274,94 @@ Risk: HIGH — affects 7/42 files (16.7% of codebase)
 | `--out FILE` | Write a markdown report to this file |
 | `--json` | Output raw JSON |
 | `--as-of REF` | Compute blast radius at a historical commit/ref instead of HEAD |
+| `--agent-format` | Output versioned JSON for the current index. Incompatible with `--json`, `--out`, and `--as-of`. |
+| `--all-dependents` | Include every dependent in agent format. |
+
+#### Agent impact output
+
+Use `--agent-format` in the CLI or pass `{"file_path":"src/auth.py","format":"agent"}`
+to MCP `get_impact`. Both emit compact JSON, carried in the existing MCP text
+content field. Version 1 always includes the indexed `target.id`, `blast_score`,
+`risk_level`, and `direct` and `transitive` groups. The score, risk, and group
+totals describe the full graph result. Each group reports `omitted`, the number
+of dependents absent from `items`.
+
+Direct items contain indexed node IDs and sort by ID. Transitive items contain
+the ID and a shortest `path`, starting at the target and ending at the dependent.
+Transitive items sort by path length and then ID, with lexical tie-breaking for
+equal-length paths to the same node. IDs usually identify files or packages.
+Each list shows up to 20 items by default. `--all-dependents` in the CLI or
+`all_dependents: true` with `format: "agent"` in MCP returns both lists in full.
+
+**Empty result** for a target with no dependents. Examples are formatted for readability.
+
+```json
+{
+  "schema_version": 1,
+  "target": {"id": "src/standalone.py"},
+  "blast_score": 0.0,
+  "risk_level": "LOW",
+  "direct": {"total": 0, "omitted": 0, "items": []},
+  "transitive": {"total": 0, "omitted": 0, "items": []}
+}
+```
+
+**Bounded result** for a target with 23 direct and 45 transitive dependents.
+This command projects the counts from the response. Both item lists contain 20 entries.
+
+```bash
+blastradius impact src/core.py --agent-format | jq '{direct: .direct | {total, omitted}, transitive: .transitive | {total, omitted}}'
+```
+
+```json
+{"direct":{"total":23,"omitted":3},"transitive":{"total":45,"omitted":25}}
+```
+
+**Full result** from `blastradius impact src/auth.py --agent-format --all-dependents`
+on a three-node graph with one direct and one transitive dependent.
+
+```json
+{
+  "schema_version": 1,
+  "target": {"id": "src/auth.py"},
+  "blast_score": 1.5,
+  "risk_level": "CRITICAL",
+  "direct": {"total": 1, "omitted": 0, "items": [{"id": "src/api.py"}]},
+  "transitive": {
+    "total": 1,
+    "omitted": 0,
+    "items": [{"id": "src/main.py", "path": ["src/auth.py", "src/api.py", "src/main.py"]}]
+  }
+}
+```
+
+##### Payload measurements
+
+Both synthetic graphs target `src/auth/token_validation.py` and include 100
+unrelated nodes named `src/unrelated/feature_NNN.py`. The small graph has three
+direct dependents and five at depth two. The large graph has 60 direct dependents
+and 80 at each of depths two, three, and four. Direct IDs are
+`src/routes/handler_NNN.py`. Transitive IDs are
+`src/services/tier_DEPTH/service_NNN.py`. Numbering starts at zero, and each
+transitive node `i` depends on node `i % previous_layer_size` in the preceding layer.
+
+Counts use UTF-8 bytes and the `o200k_base` tokenizer (`tiktoken` 0.12.0), with
+`PYTHONHASHSEED=0`. CLI counts exclude the trailing newline. MCP Markdown counts
+cover the report body with `guidance_threshold` set to `10000`. The equal-facts
+comparison adds the risk label and full transitive paths to legacy-style pretty
+CLI JSON, using the same dependent ordering as agent JSON.
+
+| Output | Small (bytes / tokens) | Large (bytes / tokens) |
+|--------|----------------------:|----------------------:|
+| Existing CLI JSON | 479 / 154 | 12,235 / 3,779 |
+| Existing MCP Markdown | 1,095 / 332 | 38,030 / 11,532 |
+| Legacy-style pretty JSON with the same facts | 1,361 / 406 | 62,924 / 18,196 |
+| Full agent JSON | 1,047 / 297 | 46,944 / 13,142 |
+| Bounded agent JSON | 1,047 / 297 | 3,887 / 1,082 |
+
+Full agent JSON used 27–28% fewer tokens than the equal-facts pretty JSON.
+On the large graph, the default limits cut token count by 92% relative to full
+agent JSON. Both lists in the small graph fit within the limits.
 
 ---
 

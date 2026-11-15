@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -11,6 +12,7 @@ from blastradius.cli import (
     _cmd_dependencies,
     _cmd_impact,
     _resolve_cli_file_id,
+    main,
 )
 
 
@@ -215,3 +217,24 @@ def test_dependencies_missing_file(cli_graph, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "File not found in index: missing.py\n"
+
+
+@pytest.mark.parametrize(
+    "options, message",
+    [
+        (["--agent-format", "--json"], "--agent-format cannot be combined"),
+        (["--agent-format", "--out", "unused.md"], "--agent-format cannot be combined"),
+        (["--agent-format", "--as-of", "HEAD"], "--agent-format cannot be combined"),
+        (["--all-dependents"], "--all-dependents requires --agent-format"),
+    ],
+)
+def test_agent_format_rejects_incompatible_options(
+    options, message, monkeypatch, capsys
+):
+    monkeypatch.setattr(sys, "argv", ["blastradius", "impact", "service.py", *options])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert message in captured.err

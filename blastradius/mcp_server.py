@@ -27,7 +27,11 @@ from blastradius.index import (
     git_reachable,
     git_resolve,
 )
-from blastradius.reporter import format_markdown
+from blastradius.reporter import (
+    build_agent_impact,
+    encode_agent_impact,
+    format_markdown,
+)
 from blastradius.symbols import SYMBOL_INDEX_FILENAME
 from blastradius.temporal.changes import filter_changed_since
 
@@ -51,6 +55,7 @@ TOOLS = [
         "description": (
             "Return the blast-radius impact report for a specific file. "
             "Shows direct dependents, transitive dependents, blast score, and risk level. "
+            "Use format='agent' for versioned impact JSON without report prose. "
             "Call this before modifying any file to understand change impact."
         ),
         "inputSchema": {
@@ -68,8 +73,18 @@ TOOLS = [
                     "type": "integer",
                     "description": "Minimum blast score for mitigation suggestions in the report. Default: 10.",
                 },
+                "format": {
+                    "type": "string",
+                    "enum": ["agent"],
+                    "description": "Use agent for compact impact JSON. Omit for the default report.",
+                },
+                "all_dependents": {
+                    "type": "boolean",
+                    "description": "Include every dependent in agent format. Default: false (up to 20 per group).",
+                },
             },
             "required": ["file_path"],
+            "dependentRequired": {"all_dependents": ["format"]},
         },
     },
     {
@@ -286,6 +301,10 @@ def _call_get_impact(params: dict, artifacts: Artifacts) -> dict:
     data, file_id = artifacts.index_for_file(
         params["file_path"], params.get("index_path")
     )
+    if params.get("format") == "agent":
+        return build_agent_impact(
+            data, file_id, all_dependents=params.get("all_dependents", False)
+        )
 
     blast_map = compute_blast_radius(data["nodes"], data["links"])
     blast = blast_map.get(file_id)
@@ -643,12 +662,17 @@ async def _serve(base: Path, discover: bool) -> None:
             result = await anyio.to_thread.run_sync(
                 execute, handler, params.arguments or {}, limiter=limiter
             )
+            agent_format = (
+                params.name == "get_impact"
+                and (params.arguments or {}).get("format") == "agent"
+            )
+            text = (
+                encode_agent_impact(result)
+                if agent_format
+                else json.dumps(result, indent=2, allow_nan=False)
+            )
             return types.CallToolResult(
-                content=[
-                    types.TextContent(
-                        type="text", text=json.dumps(result, indent=2, allow_nan=False)
-                    )
-                ]
+                content=[types.TextContent(type="text", text=text)]
             )
         except Exception as exc:  # noqa: BLE001 — tool failures must not kill the transport
             return types.CallToolResult(

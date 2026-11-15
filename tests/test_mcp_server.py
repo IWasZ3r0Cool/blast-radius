@@ -412,6 +412,21 @@ def test_notifications_do_not_produce_replies(client):
             "guidance_threshold",
         ),
         (
+            "get_impact",
+            {"file_path": "models.py", "format": "json"},
+            "format",
+        ),
+        (
+            "get_impact",
+            {"file_path": "models.py", "all_dependents": True},
+            "format",
+        ),
+        (
+            "get_impact",
+            {"file_path": "models.py", "format": "agent", "all_dependents": "true"},
+            "all_dependents",
+        ),
+        (
             "temporal_impact",
             {"file": "models.py", "guidance_threshold": 1.5},
             "guidance_threshold",
@@ -461,6 +476,75 @@ def test_report_guidance_threshold_over_mcp(client, repo, tool, params):
     assert {k: v for k, v in enabled.items() if k != "report"} == {
         k: v for k, v in suppressed.items() if k != "report"
     }
+
+
+@pytest.mark.parametrize("revision", ["2024-11-05", "2026-07-28"])
+@pytest.mark.parametrize("file_path", ["src/./auth.py", r"src\auth.py"])
+def test_agent_impact_matches_cli(tmp_path, revision, file_path):
+    target = "src/auth.py"
+    direct = "src/café.py"
+    transitive = "src/consumer_\udc80.py"
+    callers = [direct, *(f"src/caller_{i:02d}.py" for i in range(20))]
+    graph = tmp_path / "blastradius.json"
+    graph.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {"id": nid} for nid in ["auth.py", target, *callers, transitive]
+                ],
+                "links": [
+                    *({"source": nid, "target": target} for nid in callers),
+                    {"source": transitive, "target": direct},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with launch(tmp_path, "--repo", tmp_path) as client:
+        if revision == "2024-11-05":
+            client.initialize(revision)
+        else:
+            client.version = revision
+
+        for all_dependents in (False, True):
+            command = [
+                sys.executable,
+                "-m",
+                "blastradius.cli",
+                "impact",
+                file_path,
+                "--agent-format",
+            ]
+            if all_dependents:
+                command.append("--all-dependents")
+            cli = subprocess.run(
+                command,
+                cwd=tmp_path,
+                env={**environment(), "PYTHONPATH": str(ROOT)},
+                capture_output=True,
+                encoding="utf-8",
+                timeout=15,
+                check=True,
+            )
+            args = {"file_path": file_path, "format": "agent"}
+            if all_dependents:
+                args["all_dependents"] = True
+            response = client.call_tool("get_impact", args)
+            result = payload(response)
+            assert response["result"]["content"][0]["text"] + "\n" == cli.stdout
+            assert len(cli.stdout.splitlines()) == 1
+            assert "café.py" in cli.stdout
+            assert r"\udc80" in cli.stdout
+            assert result["schema_version"] == 1
+            assert result["target"] == {"id": target}
+            assert result["blast_score"] == 21.5
+            assert result["direct"]["total"] == 21
+            assert result["direct"]["omitted"] == (0 if all_dependents else 1)
+            assert result["transitive"] == {
+                "total": 1,
+                "omitted": 0,
+                "items": [{"id": transitive, "path": [target, direct, transitive]}],
+            }
 
 
 def test_modern_discovery_and_every_advertised_revision(tmp_path):

@@ -122,7 +122,12 @@ def _cmd_impact(args: argparse.Namespace) -> None:
         git_resolve,
         load,
     )
-    from blastradius.reporter import format_markdown, format_stdout
+    from blastradius.reporter import (
+        build_agent_impact,
+        encode_agent_impact,
+        format_markdown,
+        format_stdout,
+    )
 
     as_of = getattr(args, "as_of", None)
     guidance_threshold = getattr(args, "guidance_threshold", 10)
@@ -222,7 +227,7 @@ def _cmd_impact(args: argparse.Namespace) -> None:
             )
         return
 
-    # ── current-HEAD path (unchanged) ─────────────────────────────────────────
+    # ── current-index path ────────────────────────────────────────────────────
     if args.index:
         index_path = Path(args.index)
     else:
@@ -235,6 +240,20 @@ def _cmd_impact(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+
+    if getattr(args, "agent_format", False):
+        from blastradius.artifacts import Artifacts
+
+        try:
+            with Artifacts(Path.cwd()) as artifacts:
+                data, file_id = artifacts.index_for_file(args.file, str(index_path))
+        except (OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
+
+        payload = build_agent_impact(data, file_id, all_dependents=args.all_dependents)
+        print(encode_agent_impact(payload))
+        return
 
     data = load(index_path)
     node_ids = {n["id"] for n in data["nodes"]}
@@ -883,6 +902,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_impact.add_argument("--out", help="Write markdown report to this file")
     p_impact.add_argument("--json", action="store_true", help="Output raw JSON")
     p_impact.add_argument(
+        "--agent-format",
+        action="store_true",
+        help="Output compact versioned impact JSON",
+    )
+    p_impact.add_argument(
+        "--all-dependents",
+        action="store_true",
+        help="Include every dependent in agent format",
+    )
+    p_impact.add_argument(
         "--guidance-threshold",
         type=int,
         default=10,
@@ -1093,6 +1122,15 @@ def main() -> None:
 
     parser = _build_parser()
     args = parser.parse_args()
+    if args.command == "impact":
+        if args.agent_format and (
+            args.json or args.out is not None or args.as_of is not None
+        ):
+            parser.error(
+                "--agent-format cannot be combined with --json, --out, or --as-of"
+            )
+        if args.all_dependents and not args.agent_format:
+            parser.error("--all-dependents requires --agent-format")
 
     dispatch = {
         "analyze": _cmd_analyze,

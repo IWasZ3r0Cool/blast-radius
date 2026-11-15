@@ -3,11 +3,15 @@
 # Modified by Christopher Wilson.
 from __future__ import annotations
 
-"""Format blast-radius impact reports for stdout and markdown."""
+"""Format blast-radius impact reports for humans and agents."""
 
+import json
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
+from blastradius.impact import compute_blast_radius
+
+_AGENT_DEPENDENT_LIMIT = 20
 _SOURCE_SUFFIXES = {
     ".py",
     ".js",
@@ -89,6 +93,46 @@ def _risk_label(blast_score: float, total_nodes: int) -> str:
     if blast_score >= 4 or pct >= 5:
         return "MEDIUM"
     return "LOW"
+
+
+def build_agent_impact(
+    data: dict, file_id: str, *, all_dependents: bool = False
+) -> dict:
+    """Build the versioned current-index response shared by the CLI and MCP."""
+    blast = compute_blast_radius(data["nodes"], data["links"], target=file_id)[file_id]
+    paths = blast["dep_paths"]
+    direct = sorted(blast["direct_ids"])
+    transitive = sorted(blast["transitive_ids"], key=lambda nid: (len(paths[nid]), nid))
+    limit = None if all_dependents else _AGENT_DEPENDENT_LIMIT
+    direct_items = [{"id": nid} for nid in direct[:limit]]
+    transitive_items = [
+        {"id": nid, "path": [file_id, *paths[nid]]} for nid in transitive[:limit]
+    ]
+    total_nodes = sum(node.get("type") != "import" for node in data["nodes"])
+    return {
+        "schema_version": 1,
+        "target": {"id": file_id},
+        "blast_score": blast["blast_score"],
+        "risk_level": _risk_label(blast["blast_score"], total_nodes),
+        "direct": {
+            "total": len(direct),
+            "omitted": len(direct) - len(direct_items),
+            "items": direct_items,
+        },
+        "transitive": {
+            "total": len(transitive),
+            "omitted": len(transitive) - len(transitive_items),
+            "items": transitive_items,
+        },
+    }
+
+
+def encode_agent_impact(payload: dict) -> str:
+    """Keep Unicode readable and escape lone surrogates in indexed paths."""
+    text = json.dumps(
+        payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+    )
+    return text.encode("utf-8", errors="backslashreplace").decode("utf-8")
 
 
 def format_stdout(
